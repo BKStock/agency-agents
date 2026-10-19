@@ -175,10 +175,29 @@ def content_hash(rows: list[dict]) -> str:
     return hashlib.sha256(json.dumps(norm, ensure_ascii=False).encode()).hexdigest()
 
 
-def ingest(conn: sqlite3.Connection, raw_dir, sha: str, series: str, layout: dict) -> list[int]:
-    """原本を解析して version と designation_row を追記する。解析済みなら既存の version_id を返す。"""
+# 地域に属さない番号（フリーダイヤル・IP電話・携帯など）。地域の系統に混ぜず、別の系統にする
+NON_GEOGRAPHIC = ("0120", "0800", "0570", "0180", "0990", "020", "050", "060", "070", "080", "090")
+
+
+def region_series(area_code: str, non_geographic: tuple[str, ...] = NON_GEOGRAPHIC) -> str:
+    """系統＝市外局番の先頭2桁（01〜09 の地域）。ファイル名の数字は使わない。
+
+    地域に属さない番号は、その番号の頭（例 0120）をそのまま系統にする。
+    """
+    for prefix in sorted(non_geographic, key=len, reverse=True):
+        if area_code.startswith(prefix):
+            return prefix
+    return area_code[:2]
+
+
+def ingest(conn: sqlite3.Connection, raw_dir, sha: str, layout: dict) -> list[int]:
+    """原本を解析して version と designation_row を追記する。解析済みなら既存の version_id を返す。
+
+    1つの原本（ZIP なら中の1ファイル）に複数の地域が含まれていれば、地域ごとに別の版にする。
+    こうしておけば、ファイルの分け方が年によって変わっても、同じ地域同士で比較できる。
+    """
     existing = [r["version_id"] for r in conn.execute(
-        "SELECT version_id FROM numbers.version WHERE sha256 = ? AND series = ?", (sha, series))]
+        "SELECT version_id FROM numbers.version WHERE sha256 = ? ORDER BY version_id", (sha,))]
     if existing:
         return existing
     src = conn.execute("SELECT filename, wayback_ts FROM numbers.raw_source WHERE sha256 = ?"
@@ -193,14 +212,19 @@ def ingest(conn: sqlite3.Connection, raw_dir, sha: str, series: str, layout: dic
             as_of, date_source = f"{ts[:4]}-{ts[4:6]}-{ts[6:8]}", "wayback_ts"
         else:
             as_of, date_source = None, "unknown"
-        vid = conn.execute(
-            "INSERT INTO numbers.version (sha256, member, series, as_of_date, date_source, layout, row_count,"
-            " content_sha256, parsed_at) VALUES (?,?,?,?,?,?,?,?,?)",
-            (sha, table.member, series, as_of, date_source, layout["layout_id"], len(table.rows),
-             content_hash(table.rows), utc_now())).lastrowid
-        conn.executemany(
-            "INSERT INTO numbers.designation_row VALUES (?,?,?,?,?,?,?,?,?)",
-            [(vid, i, r["area_code"], r["local_code"], r["number_area_code"], r["number_area_name"],
-              r["carrier"], r["usage_status"], r["repaired"]) for i, r in enumerate(table.rows)])
-        ids.append(int(vid))
+        groups: dict[str, list[dict]] = {}
+        nongeo = tuple(layout.get("non_geographic_prefixes", NON_GEOGRAPHIC))
+        for r in table.rows:
+            groups.setdefault(region_series(r["area_code"], nongeo), []).append(r)
+        for series, rows in sorted(groups.items()):
+            vid = conn.execute(
+                "INSERT INTO numbers.version (sha256, member, series, as_of_date, date_source, layout, row_count,"
+                " content_sha256, parsed_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                (sha, table.member, series, as_of, date_source, layout["layout_id"], len(rows),
+                 content_hash(rows), utc_now())).lastrowid
+            conn.executemany(
+                "INSERT INTO numbers.designation_row VALUES (?,?,?,?,?,?,?,?,?)",
+                [(vid, i, r["area_code"], r["local_code"], r["number_area_code"], r["number_area_name"],
+                  r["carrier"], r["usage_status"], r["repaired"]) for i, r in enumerate(rows)])
+            ids.append(int(vid))
     return ids

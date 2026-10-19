@@ -29,7 +29,7 @@ def _json(path: Path) -> dict:
 
 
 def update(paths: DataPaths, *, config_dir: Path = CONFIG_DIR, online: bool = True, wayback: bool = False,
-           local_files: list[tuple[Path, str]] = (), transport: Transport | None = None,
+           local_files: list[Path] = (), transport: Transport | None = None,
            do_export: bool = True, do_backup: bool = True, sleep=None) -> dict:
     paths.ensure()
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
@@ -59,23 +59,23 @@ def update(paths: DataPaths, *, config_dir: Path = CONFIG_DIR, online: bool = Tr
                              max_attempts=sources.get("max_attempts", 4), log=acq.make_logger(conn, "wayback"), **kw)
                 collected += acq.collect_wayback(wb, conn, paths.raw, sources)
                 conn.commit()
-        for path, series in local_files:
-            collected.append(acq.import_local(conn, paths.raw, Path(path), series))
+        for path in local_files:
+            collected.append(acq.import_local(conn, paths.raw, Path(path)))
         conn.commit()
         manifest["stages"]["acquire"] = {"collected": len(collected), "new_raw_files": sum(c.is_new for c in collected)}
 
         # 2. 解析（未解析の原本×系統）
-        todo = conn.execute("""SELECT DISTINCT s.sha256, s.series FROM numbers.raw_source s
+        todo = conn.execute("""SELECT DISTINCT s.sha256 FROM numbers.raw_source s
                                WHERE NOT EXISTS (SELECT 1 FROM numbers.version v
-                                                 WHERE v.sha256 = s.sha256 AND v.series = s.series)""").fetchall()
+                                                 WHERE v.sha256 = s.sha256)""").fetchall()
         parsed, errors = 0, []
         for r in todo:
             try:
-                parsed += len(designation.ingest(conn, paths.raw, r["sha256"], r["series"], layout))
+                parsed += len(designation.ingest(conn, paths.raw, r["sha256"], layout))
                 conn.commit()
             except designation.UnknownLayout as exc:
                 conn.rollback()
-                errors.append({"sha256": r["sha256"], "series": r["series"], "error": str(exc)})
+                errors.append({"sha256": r["sha256"], "error": str(exc)})
         manifest["stages"]["ingest"] = {"new_versions": parsed, "unknown_layouts": errors}
 
         # 3. 版選択と差分
@@ -91,7 +91,7 @@ def update(paths: DataPaths, *, config_dir: Path = CONFIG_DIR, online: bool = Tr
                                                           "codes_changed_in_multiple_pairs", "kinds")}}
 
         # 4. 品質検査
-        results = checks.run_checks(conn, paths.raw)
+        results = checks.run_checks(conn, paths.raw, min_pair_overlap=layout.get("min_pair_overlap", 0.5))
         if errors:
             results.append(checks.Check("Q00_unknown_layout", "error", False, {"files": errors}))
         checks.record(conn, pid, results)

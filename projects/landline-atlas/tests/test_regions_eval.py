@@ -108,12 +108,37 @@ class CliTest(unittest.TestCase):
             f = d / "06.xlsx"
             f.write_bytes(xlsx("令和5年4月1日現在", V2023))
             data = str(d / "data")
-            self.assertEqual(atlas(["--data-dir", data, "update", "--offline", "--import", f"{f}:06"]), 0)
+            self.assertEqual(atlas(["--data-dir", data, "update", "--offline", "--import", str(f)]), 0)
+            self.assertEqual(atlas(["--data-dir", data, "update", "--offline", "--import", f"{f}:06"]), 0)  # 旧形式も可
             self.assertEqual(atlas(["--data-dir", data, "qa"]), 0)
             self.assertEqual(atlas(["--data-dir", data, "backup"]), 0)
             runs = list((d / "data" / "runs").iterdir())
-            m = json.loads((runs[0] / "run_manifest.json").read_text(encoding="utf-8"))
+            m = json.loads((sorted(runs)[0] / "run_manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(m["stages"]["history"]["selected_versions"], 1)
+
+    def test_migrate_raw_keeps_provenance_and_old_store(self):
+        import hashlib
+        from support import V2023, V2024, xlsx
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            f23, f24 = d / "000111111.xlsx", d / "000222222.xlsx"
+            f23.write_bytes(xlsx("令和5年4月1日現在", V2023))
+            f24.write_bytes(xlsx("令和6年4月1日現在", V2024))
+            old, new = str(d / "old"), str(d / "new")
+            atlas(["--data-dir", old, "update", "--offline", "--import", str(f23), "--import", str(f24)])
+            old_db = d / "old" / "db" / "numbers.sqlite3"
+            before = hashlib.sha256(old_db.read_bytes()).hexdigest()
+            self.assertEqual(atlas(["--data-dir", new, "migrate-raw", "--from", old]), 0)
+            self.assertEqual(hashlib.sha256(old_db.read_bytes()).hexdigest(), before)
+            self.assertEqual(atlas(["--data-dir", new, "update", "--offline"]), 0)
+            from landline_atlas.db.connection import connect
+            conn = connect(d / "new" / "db", read_only=True)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM numbers.raw_file").fetchone()[0], 2)
+            self.assertEqual({r[0] for r in conn.execute("SELECT origin FROM numbers.raw_source")}, {"manual"})
+            self.assertEqual({r[0] for r in conn.execute("SELECT series FROM numbers.selected_version")}, {"06"})
+            conn.close()
+            with self.assertRaises(ValueError):
+                atlas(["--data-dir", new, "migrate-raw", "--from", new])
 
 
 @unittest.skipUnless(HAVE_GEO, "geopandas/shapely/pyproj not installed")

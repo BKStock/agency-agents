@@ -48,7 +48,7 @@ class PipelineTest(unittest.TestCase):
                        observed_on="2026-10-01")
         conn.commit()
         conn.close()
-        self.manifest = update(self.paths, wayback=True, local_files=[(self.local, "06")], transport=self.transport,
+        self.manifest = update(self.paths, wayback=True, local_files=[self.local], transport=self.transport,
                                sleep=lambda s: None)
         self.assertEqual(self.local.read_bytes(), before)  # 手元の原本は変更しない
 
@@ -92,7 +92,7 @@ class PipelineTest(unittest.TestCase):
         wb.save(buf)
         bad = Path(self.tmp.name) / "bad.xlsx"
         bad.write_bytes(buf.getvalue())
-        m = update(self.paths, online=False, local_files=[(bad, "07")], do_export=False)
+        m = update(self.paths, online=False, local_files=[bad], do_export=False)
         self.assertEqual(m["outcome"], "blocked_by_qa")
         self.assertFalse(m["stages"]["qa"]["Q00_unknown_layout"]["passed"])
         self.assertNotIn("classify", m["stages"])

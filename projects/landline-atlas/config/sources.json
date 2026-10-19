@@ -1,5 +1,5 @@
 {
-  "_note": "総務省ページの URL とファイル名規則は実ページで要確認。series は正規表現の名前付きグループで取り出す。",
+  "_note": "総務省ページの URL とファイル名規則は実ページで要確認。系統（地域 01〜09）は表の中の市外局番から決めるので、ここではファイルを見つけるだけ。",
   "user_agent": "landline-atlas/1.0 (research; contact: set-your-email@example.invalid)",
   "min_interval_seconds": 3.0,
   "max_attempts": 4,
@@ -8,7 +8,7 @@
       "url": "https://www.soumu.go.jp/main_sosiki/joho_tsusin/top/tel_number/number_shitei.html",
       "encoding": "utf-8",
       "file_patterns": [
-        {"regex": "/main_content/[^/]*(?P<series>0[1-9])[^/]*\\.(?:xls|xlsx|zip|csv)$"}
+        {"regex": "/main_content/[^/]+\\.(?:xls|xlsx|zip|csv)$"}
       ]
     }
   ],

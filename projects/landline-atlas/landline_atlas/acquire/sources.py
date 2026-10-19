@@ -1,12 +1,14 @@
 """総務省ページ・Wayback からの原本収集。
 
 総務省ページの URL とファイル名の規則は config/sources.json で設定する
-（実ページで要確認）。リンクの系統（series）は正規表現の名前付きグループ
-series で取り出すか、固定値で与える。
+（実ページで要確認）。系統（地域 01〜09）は表の中の市外局番から決める
+（ingest/designation.py）。総務省のファイル名は連番 ID なので、リンク側の
+series は参考情報（既定 "auto"）にとどめる。
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sqlite3
@@ -71,9 +73,7 @@ def discover_links(html: str, base_url: str, patterns: list[dict]) -> list[Link]
             m = re.search(p["regex"], original)
             if not m:
                 continue
-            series = m.groupdict().get("series") or p.get("series")
-            if not series:
-                raise ValueError(f"pattern {p['regex']!r} yields no series")
+            series = m.groupdict().get("series") or p.get("series") or "auto"
             key = canonical_url(original)
             if key not in seen:
                 seen.add(key)
@@ -156,8 +156,37 @@ def collect_wayback(fetcher: Fetcher, conn: sqlite3.Connection, raw_dir: Path, s
     return out
 
 
-def import_local(conn: sqlite3.Connection, raw_dir: Path, path: Path, series: str) -> Collected:
+def import_local(conn: sqlite3.Connection, raw_dir: Path, path: Path, series: str = "auto") -> Collected:
     """手元のファイルを原本として取り込む（元ファイルは読むだけで変更しない）。"""
     sha, new = archive.store(conn, raw_dir, path.read_bytes(), url=path.resolve().as_uri(), origin="manual",
                              series=series, filename=path.name)
     return Collected(sha, series, path.resolve().as_uri(), "manual", None, new)
+
+
+def migrate_raw(conn: sqlite3.Connection, raw_dir: Path, old_root: Path) -> dict:
+    """古いデータ置き場から原本と入手経路・取得記録を写す（古い側は読み取り専用で、変更しない）。"""
+    old_db = old_root / "db" / "numbers.sqlite3"
+    if old_root.resolve() == raw_dir.parent.resolve():
+        raise ValueError("--from must be a different data directory")
+    if not old_db.is_file():
+        raise FileNotFoundError(old_db)
+    old = sqlite3.connect(f"{old_db.resolve().as_uri()}?mode=ro", uri=True)
+    old.row_factory = sqlite3.Row
+    files = new = 0
+    try:
+        paths = {r["sha256"]: r["stored_path"] for r in old.execute("SELECT sha256, stored_path FROM raw_file")}
+        for r in old.execute("SELECT * FROM raw_source ORDER BY fetched_at"):
+            body = (old_root / "raw" / paths[r["sha256"]]).read_bytes()
+            if hashlib.sha256(body).hexdigest() != r["sha256"]:
+                raise archive.ArchiveCorruption(f"old archive file for {r['sha256']} is altered")
+            _, is_new = archive.store(conn, raw_dir, body, url=r["url"], origin=r["origin"], series=r["series"],
+                                      filename=r["filename"], wayback_ts=r["wayback_ts"], fetched_at=r["fetched_at"])
+            files += 1
+            new += is_new
+        logs = old.execute("SELECT url, canonical, origin, attempt, status, error, sha256, fetched_at"
+                           " FROM fetch_log ORDER BY fetch_id").fetchall()
+        conn.executemany("INSERT INTO numbers.fetch_log (url, canonical, origin, attempt, status, error, sha256,"
+                         " fetched_at) VALUES (?,?,?,?,?,?,?,?)", [tuple(x) for x in logs])
+    finally:
+        old.close()
+    return {"sources": files, "raw_files": new, "fetch_log": len(logs)}

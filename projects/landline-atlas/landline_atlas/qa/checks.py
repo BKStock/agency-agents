@@ -24,7 +24,7 @@ class Check:
     detail: dict
 
 
-def run_checks(conn: sqlite3.Connection, raw_dir: Path) -> list[Check]:
+def run_checks(conn: sqlite3.Connection, raw_dir: Path, *, min_pair_overlap: float = 0.5) -> list[Check]:
     out: list[Check] = []
 
     # Q01 比較組：同一系統・選択済みの版・基準日が隣接
@@ -103,6 +103,23 @@ def run_checks(conn: sqlite3.Connection, raw_dir: Path) -> list[Check]:
     # Q10 DB の整合性
     integ = integrity(conn)
     out.append(Check("Q10_integrity", "error", all(v == "ok" for v in integ.values()), integ))
+
+    # Q12 比較組の重なり率：新旧どちらかにある局番のうち、両方にある割合。低ければ別の表同士を比べている疑い
+    low = []
+    for series, old, new in diff.adjacent_pairs(conn):
+        n_old, n_new = (conn.execute("SELECT COUNT(*) FROM (SELECT DISTINCT area_code, local_code"
+                                     " FROM numbers.designation_row WHERE version_id = ?)", (v,)).fetchone()[0]
+                        for v in (old["version_id"], new["version_id"]))
+        both = conn.execute("SELECT COUNT(*) FROM (SELECT area_code, local_code FROM numbers.designation_row"
+                            " WHERE version_id = ? INTERSECT SELECT area_code, local_code FROM numbers.designation_row"
+                            " WHERE version_id = ?)", (old["version_id"], new["version_id"])).fetchone()[0]
+        union = n_old + n_new - both
+        overlap = round(both / union, 4) if union else 1.0
+        if overlap < min_pair_overlap:
+            low.append({"series": series, "old_date": old["as_of_date"], "new_date": new["as_of_date"],
+                        "old_rows": n_old, "new_rows": n_new, "common": both, "overlap": overlap})
+    out.append(Check("Q12_pair_overlap", "error", not low,
+                     {"min_pair_overlap": min_pair_overlap, "low_overlap_pairs": low}))
 
     # 補正の可視化（先頭0の補い・結合セルの引継ぎ）
     repaired = {r[0]: r[1] for r in conn.execute(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -35,10 +36,11 @@ def _conn(a, read_only=False):
 def cmd_update(a):
     files = []
     for item in a.import_file or []:
-        path, _, series = item.rpartition(":")
-        if not path or not series:
-            raise SystemExit("--import は FILE:SERIES の形式で指定")
-        files.append((Path(path).expanduser(), series))
+        head, _, tail = item.rpartition(":")
+        if head and re.fullmatch(r"0\d{1,3}", tail):  # 旧形式 FILE:SERIES
+            print(f"注意: 系統の指定 :{tail} は不要になりました（表の中の市外局番から自動で決めます）", file=sys.stderr)
+            item = head
+        files.append(Path(item).expanduser())
     m = update(a.paths, config_dir=a.config_dir, online=not a.offline, wayback=a.wayback, local_files=files,
                do_export=not a.no_export)
     _print(m)
@@ -148,9 +150,21 @@ def cmd_evaluate(a):
     _print(r)
 
 
+def cmd_migrate_raw(a):
+    from .acquire.sources import migrate_raw
+    old = paths_mod.check_writable_location(Path(a.source), protected=())
+    a.paths.ensure()
+    conn = _conn(a)
+    r = migrate_raw(conn, a.paths.raw, old)
+    conn.commit()
+    _print(r)
+    print("次は: atlas update --offline", file=sys.stderr)
+
+
 def cmd_qa(a):
     conn = _conn(a)
-    res = checks.run_checks(conn, a.paths.raw)
+    layout = json.loads((a.config_dir / "layouts.json").read_text(encoding="utf-8"))
+    res = checks.run_checks(conn, a.paths.raw, min_pair_overlap=layout.get("min_pair_overlap", 0.5))
     _print([c.__dict__ for c in res])
     return 1 if checks.blocking(res) else 0
 
@@ -190,9 +204,11 @@ def parser() -> argparse.ArgumentParser:
     s = add("update", cmd_update, "取得から出力までを一括実行")
     s.add_argument("--offline", action="store_true", help="ネットワーク取得をしない（--import のみ）")
     s.add_argument("--wayback", action="store_true", help="Internet Archive の過去版も取得")
-    s.add_argument("--import", dest="import_file", action="append", help="手元の原本 FILE:SERIES")
+    s.add_argument("--import", dest="import_file", action="append", help="手元の原本ファイル（何度でも指定可）")
     s.add_argument("--no-export", action="store_true")
 
+    s = add("migrate-raw", cmd_migrate_raw, "古いデータ置き場から原本と取得記録を写す（再ダウンロード不要）")
+    s.add_argument("--from", dest="source", required=True, help="古いデータ置き場（例 ~/landline_atlas_data_old）")
     s = add("import-census", cmd_import_census, "e-Stat 小地域の町丁目マスタ・特徴量を取込")
     s.add_argument("--mapping", required=True)
     s.add_argument("--towns")

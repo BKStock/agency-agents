@@ -30,12 +30,13 @@ def stored_path(raw_dir: Path, sha: str, filename: str) -> Path:
     return raw_dir / sha[:2] / f"{sha}{ext}"
 
 
-def store(conn: sqlite3.Connection, raw_dir: Path, body: bytes, *, url: str, origin: str, series: str,
-          filename: str | None = None, wayback_ts: str | None = None) -> tuple[str, bool]:
+def store(conn: sqlite3.Connection, raw_dir: Path, body: bytes, *, url: str, origin: str, series: str = "auto",
+          filename: str | None = None, wayback_ts: str | None = None,
+          fetched_at: str | None = None) -> tuple[str, bool]:
     """原本を保存して (sha256, 新規か) を返す。既存なら内容を再検証する。"""
     sha = hashlib.sha256(body).hexdigest()
     name = filename or Path(urlsplit(url).path).name
-    now = utc_now()
+    now = fetched_at or utc_now()
     row = conn.execute("SELECT stored_path FROM numbers.raw_file WHERE sha256 = ?", (sha,)).fetchone()
     is_new = row is None
     if is_new:

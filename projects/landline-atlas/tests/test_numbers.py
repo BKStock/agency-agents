@@ -139,7 +139,7 @@ class ArchiveIngestTest(unittest.TestCase):
         for ts, rows, text in (("2023", V2023, "令和5年4月1日現在"), ("2024", V2024, "令和6年4月1日現在"),
                                ("2025", V2025, "令和7年1月1日現在")):
             sha, _ = self.store(xlsx(text, rows), f"https://www.soumu.go.jp/main_content/06_{ts}.xlsx")
-            designation.ingest(self.conn, self.raw, sha, "06", layout())
+            designation.ingest(self.conn, self.raw, sha, layout())
 
     def test_versions_and_diffs_separate_gross_and_distinct(self):
         self.ingest_three()
@@ -164,7 +164,7 @@ class ArchiveIngestTest(unittest.TestCase):
         other = xlsx("令和7年1月1日現在", V2025[:2])
         sha, _ = self.store(other, "https://web.archive.org/web/20250102id_/https://www.soumu.go.jp/x.xlsx",
                             origin="wayback", ts="20250102")
-        designation.ingest(self.conn, self.raw, sha, "06", layout())
+        designation.ingest(self.conn, self.raw, sha, layout())
         decisions = {d["as_of_date"]: d for d in versions.select_versions(self.conn)}
         d = decisions["2025-01-01"]
         self.assertTrue(d["reason"].startswith("content_differs:2;prefer_origin:official"))
@@ -176,9 +176,9 @@ class ArchiveIngestTest(unittest.TestCase):
     def test_duplicate_keys_and_repeated_content_are_flagged(self):
         dup = V2025 + [["06", "6202", "A27-1", "大阪", "KDDI", "使用中"]]
         sha, _ = self.store(xlsx("令和7年1月1日現在", dup), "https://www.soumu.go.jp/main_content/06_dup.xlsx")
-        designation.ingest(self.conn, self.raw, sha, "06", layout())
+        designation.ingest(self.conn, self.raw, sha, layout())
         sha, _ = self.store(xlsx("令和7年7月1日現在", dup), "https://www.soumu.go.jp/main_content/06_same.xlsx")
-        designation.ingest(self.conn, self.raw, sha, "06", layout())  # 基準日だけ違う同一内容
+        designation.ingest(self.conn, self.raw, sha, layout())  # 基準日だけ違う同一内容
         versions.select_versions(self.conn)
         diff.compute_diffs(self.conn, layout()["in_use_values"])
         res = {c.check_id: c for c in checks.run_checks(self.conn, self.raw)}
@@ -208,7 +208,7 @@ class CollectTest(unittest.TestCase):
             f = Fetcher(t, user_agent="ua", min_interval=0, sleep=lambda s: None,
                         log=sources.make_logger(conn, "official"))
             got = sources.collect_official(f, conn, raw, cfg)
-            self.assertEqual([(c.series, c.origin) for c in got], [("06", "official")])
+            self.assertEqual([(c.series, c.origin) for c in got], [("auto", "official")])  # 系統は中身から決める
             wb = sources.collect_wayback(f, conn, raw, cfg)
             self.assertEqual(len(wb), 2)
             self.assertEqual(sum(c.is_new for c in wb), 1)  # 2025 版は公式取得と同一内容
@@ -228,3 +228,68 @@ class CollectTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# 北海道（01）と大阪（06）の表。総務省のような連番 ID のファイル名では、名前から地域は分からない
+HOKKAIDO_2023 = [["011", "200", "A01-1", "札幌", "NTT東日本", "使用中"], ["011", "201", "A01-1", "札幌", "NTT東日本", "使用中"]]
+HOKKAIDO_2024 = [["011", "200", "A01-1", "札幌", "NTT東日本", "使用中"], ["011", "201", "A01-1", "札幌", "KDDI", "使用中"]]
+
+
+class SeriesFromContentTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.raw = Path(self.tmp.name) / "raw"
+        self.conn = db(Path(self.tmp.name))
+        self.addCleanup(self.conn.close)
+
+    def put(self, name, text, rows, link_series="08"):
+        sha, _ = archive.store(self.conn, self.raw, xlsx(text, rows),
+                               url=f"https://www.soumu.go.jp/main_content/{name}", origin="official",
+                               series=link_series)
+        return designation.ingest(self.conn, self.raw, sha, layout())
+
+    def test_numeric_id_filenames_do_not_mix_regions(self):
+        # どちらのファイル名からも「08」が取れてしまうが、中身は 01 と 06
+        self.put("000879543.xlsx", "令和5年4月1日現在", HOKKAIDO_2023)
+        self.put("000881543.xlsx", "令和5年4月1日現在", V2023)
+        self.put("000901543.xlsx", "令和6年4月1日現在", HOKKAIDO_2024)
+        self.put("000908543.xlsx", "令和6年4月1日現在", V2024)
+        series = {r[0] for r in self.conn.execute("SELECT DISTINCT series FROM numbers.version")}
+        self.assertEqual(series, {"01", "06"})
+        versions.select_versions(self.conn)
+        diff.compute_diffs(self.conn, layout()["in_use_values"])
+        s = diff.summary(self.conn)
+        self.assertEqual(s["pairs"], 2)
+        self.assertEqual(s["kinds"].get("carrier_changed"), 1)  # 北海道 201 の事業者変更
+        res = {c.check_id: c for c in checks.run_checks(self.conn, self.raw)}
+        self.assertTrue(res["Q12_pair_overlap"].passed, res["Q12_pair_overlap"].detail)
+        self.assertTrue(res["Q09_same_date_selection"].passed)
+        self.assertEqual(res["Q09_same_date_selection"].detail["same_date_different_content"], [])
+
+    def test_one_file_with_two_regions_splits(self):
+        ids = self.put("000123456.xlsx", "令和5年4月1日現在", HOKKAIDO_2023 + V2023)
+        rows = {r["series"]: r["row_count"] for r in self.conn.execute(
+            "SELECT series, row_count FROM numbers.version WHERE version_id IN (%s)" % ",".join("?" * len(ids)), ids)}
+        self.assertEqual(rows, {"01": 2, "06": 3})
+        self.assertEqual(self.put("000123456.xlsx", "令和5年4月1日現在", HOKKAIDO_2023 + V2023), ids)  # 再解析しない
+
+    def test_non_geographic_numbers_get_their_own_series(self):
+        rows = HOKKAIDO_2023 + [["0120", "123", None, None, "NTT東日本", "使用中"],
+                                ["050", "5000", None, None, "IP事業者", "使用中"],
+                                ["0123", "22", "A01-9", "千歳", "NTT東日本", "使用中"]]
+        self.put("000333333.xlsx", "令和5年4月1日現在", rows)
+        got = {r[0]: r[1] for r in self.conn.execute("SELECT series, row_count FROM numbers.version")}
+        self.assertEqual(got, {"01": 3, "0120": 1, "050": 1})  # 0123（千歳）は北海道の地域番号
+
+    def test_q12_blocks_comparison_of_unrelated_tables(self):
+        # 同じ地域 06 でも、範囲がほとんど重ならない表同士の比較は error
+        self.put("a.xlsx", "令和5年4月1日現在", V2023)
+        self.put("b.xlsx", "令和6年4月1日現在", [["06", f"{7000 + i}", "A27-9", "大阪", "NTT西日本", "使用中"]
+                                                for i in range(10)])
+        versions.select_versions(self.conn)
+        diff.compute_diffs(self.conn, layout()["in_use_values"])
+        q12 = [c for c in checks.run_checks(self.conn, self.raw) if c.check_id == "Q12_pair_overlap"][0]
+        self.assertFalse(q12.passed)
+        self.assertEqual(q12.severity, "error")
+        self.assertEqual(q12.detail["low_overlap_pairs"][0]["overlap"], 0.0)

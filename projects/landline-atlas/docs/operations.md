@@ -19,7 +19,7 @@ atlas init      # ~/landline_atlas_data（変える場合は --data-dir か LAND
 
 ```bash
 find ~/official_phone_data -type f -print0 | sort -z | xargs -0 shasum -a 256 > /tmp/before.txt
-atlas update --offline --import ~/official_phone_data/xxx/06.xls:06
+atlas update --offline --import ~/official_phone_data/xxx/06.xls
 find ~/official_phone_data -type f -print0 | sort -z | xargs -0 shasum -a 256 > /tmp/after.txt
 diff /tmp/before.txt /tmp/after.txt && echo "unchanged"
 ```
@@ -77,6 +77,20 @@ diff /tmp/before.txt /tmp/after.txt && echo "unchanged"
 | Q08 | 原本の破損・欠落 | `backups/` から DB を戻し、`raw/` を再取得する |
 | Q09 | 同一基準日の内容違いの理由が未記録 | `atlas update` の再実行で記録される |
 | Q10 | DB の破損 | 最新の `backups/<時刻>/` から戻す |
+| Q12 | 隣接する版の局番がほとんど重ならない（別の表同士の比較、または1つの地域が複数ファイルに分かれている） | `atlas qa` の `low_overlap_pairs` を共有して相談する |
+
+## 旧バージョン（2026-10-19 版）で集めたデータの引き継ぎ
+
+旧バージョンは、系統をファイル名の数字から決めていたため、別地域の表同士を比べていました。その DB は使わず、原本だけを新しい置き場に写して解析し直します。再ダウンロードは不要です。
+
+```bash
+cd ~/agency-agents && git pull && cd projects/landline-atlas && source .venv/bin/activate
+mv ~/landline_atlas_data ~/landline_atlas_data_old     # 消さずに名前を変えて残す
+atlas init
+atlas migrate-raw --from ~/landline_atlas_data_old     # 原本と入手経路・取得記録を写す
+atlas update --offline                                 # 写した原本を解析し直す
+atlas qa
+```
 
 ## 復旧
 
