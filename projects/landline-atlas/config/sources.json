@@ -1,0 +1,20 @@
+{
+  "_note": "総務省ページの URL とファイル名規則は実ページで要確認。series は正規表現の名前付きグループで取り出す。",
+  "user_agent": "landline-atlas/1.0 (research; contact: set-your-email@example.invalid)",
+  "min_interval_seconds": 3.0,
+  "max_attempts": 4,
+  "official_pages": [
+    {
+      "url": "https://www.soumu.go.jp/main_sosiki/joho_tsusin/top/tel_number/number_shitei.html",
+      "encoding": "utf-8",
+      "file_patterns": [
+        {"regex": "/main_content/[^/]*(?P<series>0[1-9])[^/]*\\.(?:xls|xlsx|zip|csv)$"}
+      ]
+    }
+  ],
+  "wayback": {
+    "cdx_endpoint": "https://web.archive.org/cdx/search/cdx",
+    "replay_prefix": "https://web.archive.org/web/",
+    "from": "2010"
+  }
+}

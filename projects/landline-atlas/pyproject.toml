@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "landline-atlas"
+version = "1.0.0.dev0"
+description = "全国固定電話番号調査システム：番号指定の取得・履歴、R1〜R6・L1〜L6 地域分類、公開施設観測、調査優先順位"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+excel = ["openpyxl>=3.1", "xlrd>=2.0"]
+gis = ["geopandas>=1.0", "pyproj>=3.6", "shapely>=2.0", "rasterio>=1.4", "numpy>=1.26"]
+
+[project.scripts]
+atlas = "landline_atlas.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["landline_atlas*"]
+
+[tool.setuptools.package-data]
+landline_atlas = ["db/*.sql"]

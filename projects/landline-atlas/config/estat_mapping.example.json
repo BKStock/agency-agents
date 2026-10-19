@@ -1,0 +1,24 @@
+{
+  "_note": "e-Stat 小地域集計 CSV の列名は表・年次ごとに異なる。実ファイルの見出しを見て書き換えること（ここの列名は例）。",
+  "town_columns": {
+    "town_key": "KEY_CODE",
+    "municipality_code": "CITY_CODE",
+    "name": "S_NAME",
+    "htksyori": "HTKSYORI",
+    "htksaki": "HTKSAKI"
+  },
+  "key_column": "KEY_CODE",
+  "features": {
+    "T001101001": "pop_total",
+    "T001101034": "pop_65plus",
+    "T001101035": "pop_age_known",
+    "T004001001": "households_general",
+    "T004001002": "hh_in_housing",
+    "T004002002": "hh_detached",
+    "T004002004": "hh_apartment",
+    "T004003002": "hh_owned",
+    "T004003003": "hh_rented_public",
+    "T004003004": "hh_rented_private",
+    "T004003005": "hh_company"
+  }
+}

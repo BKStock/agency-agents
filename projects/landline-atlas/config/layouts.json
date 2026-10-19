@@ -1,0 +1,14 @@
+{
+  "_note": "総務省の固定電話番号指定状況の表を見出し語で読む。列は上から順に割り当て、1つのセルは1列にしか使わない。使用中の表記は実ファイルで要確認。",
+  "layout_id": "soumu-keywords-v1",
+  "header_search_rows": 40,
+  "columns": [
+    {"name": "area_code", "aliases": ["市外局番"], "required": true, "fill_down": true},
+    {"name": "local_code", "aliases": ["市内局番"], "required": true},
+    {"name": "number_area_code", "aliases": ["番号区画コード", "区画コード"], "fill_down": true},
+    {"name": "number_area_name", "aliases": ["番号区画", "単位料金区域", "MA名", "MA"], "fill_down": true},
+    {"name": "carrier", "aliases": ["指定事業者", "電気通信事業者", "事業者名", "事業者"]},
+    {"name": "usage_status", "aliases": ["使用状況", "指定状況", "状態"]}
+  ],
+  "in_use_values": ["使用中", "指定済", "指定済み"]
+}
