@@ -184,7 +184,9 @@ class ArchiveIngestTest(unittest.TestCase):
         res = {c.check_id: c for c in checks.run_checks(self.conn, self.raw)}
         self.assertFalse(res["Q04_duplicates_and_multi_period"].passed)
         self.assertEqual(len(res["Q04_duplicates_and_multi_period"].detail["duplicate_keys_in_selected_versions"]), 2)
-        self.assertFalse(res["Q06_duplicate_content"].passed)
+        # 隣り合う日付の同一内容は「変更なしの再掲」として情報扱い（警告にしない）
+        self.assertTrue(res["Q06_duplicate_content"].passed)
+        self.assertEqual(len(res["Q06_duplicate_content"].detail["republished_unchanged"]), 1)
 
     def test_append_only(self):
         self.ingest_three()
@@ -293,3 +295,76 @@ class SeriesFromContentTest(unittest.TestCase):
         self.assertFalse(q12.passed)
         self.assertEqual(q12.severity, "error")
         self.assertEqual(q12.detail["low_overlap_pairs"][0]["overlap"], 0.0)
+
+
+def _osaka(n, carrier, area_code="A27-1"):
+    return [["06", f"{6000 + i}", area_code, "大阪", carrier, "使用中"] for i in range(n)]
+
+
+class ApparentChangeTest(unittest.TestCase):
+    """見かけの変更（列の欠落・一斉の名称変更）を、実際の変更と分けて扱う。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.raw = Path(self.tmp.name) / "raw"
+        self.conn = db(Path(self.tmp.name))
+        self.addCleanup(self.conn.close)
+
+    def put(self, name, text, rows):
+        sha, _ = archive.store(self.conn, self.raw, xlsx(text, rows), url=f"https://www.soumu.go.jp/main_content/{name}",
+                               origin="official")
+        designation.ingest(self.conn, self.raw, sha, layout())
+
+    def build(self):
+        self.put("1.xlsx", "令和5年4月1日現在", _osaka(40, "NTT西日本", area_code=None))  # 区画コードの列が空
+        self.put("2.xlsx", "令和6年4月1日現在", _osaka(40, "NTT西日本"))
+        renamed = _osaka(40, "西日本電信電話株式会社")
+        renamed[0][4] = "KDDI"  # 個別の変更は1件だけ
+        self.put("3.xlsx", "令和7年4月1日現在", renamed)
+        versions.select_versions(self.conn)
+        diff.compute_diffs(self.conn, layout()["in_use_values"])
+
+    def test_empty_column_is_not_compared(self):
+        self.build()
+        s = diff.summary(self.conn)
+        self.assertNotIn("number_area_changed", s["kinds"])
+        first = s["per_pair"][0]
+        self.assertEqual(first["skipped_columns"], "number_area_code")
+        self.assertEqual(first["change_rows"], 0)
+
+    def test_bulk_rename_is_separated_from_individual_changes(self):
+        self.build()
+        s = diff.summary(self.conn, bulk_min_rows=30)
+        self.assertEqual(s["kinds"]["carrier_changed"], 40)  # 生の行は残す
+        self.assertEqual(s["bulk_changes"], {"carrier_changed": 39})
+        self.assertEqual(s["individual_changes"], {"carrier_changed": 1})
+        top = s["top_transitions"][0]
+        self.assertEqual((top["old_value"], top["new_value"], top["rows"]), ("NTT西日本", "西日本電信電話株式会社", 39))
+        q13 = [c for c in checks.run_checks(self.conn, self.raw) if c.check_id == "Q13_bulk_transitions"][0]
+        self.assertFalse(q13.passed)
+        self.assertEqual(q13.severity, "warning")
+
+    def test_diffs_rebuilt_when_algorithm_changes(self):
+        self.build()
+        n_versions = self.conn.execute("SELECT COUNT(*) FROM numbers.version").fetchone()[0]
+        self.conn.execute("UPDATE numbers.diff_meta SET value = 'old' WHERE key = 'algorithm'")
+        self.assertEqual(diff.compute_diffs(self.conn, layout()["in_use_values"]), 2)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM numbers.diff_pair").fetchone()[0], 2)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM numbers.version").fetchone()[0], n_versions)
+
+    def test_unchanged_republication_is_info_not_warning(self):
+        same = _osaka(5, "NTT西日本")
+        self.put("a.xlsx", "令和5年1月1日現在", same)
+        self.put("b.xlsx", "令和5年2月1日現在", same)  # 隣り合う日付で同一内容 → 再掲
+        versions.select_versions(self.conn)
+        q06 = [c for c in checks.run_checks(self.conn, self.raw) if c.check_id == "Q06_duplicate_content"][0]
+        self.assertTrue(q06.passed)
+        self.assertEqual(len(q06.detail["republished_unchanged"]), 1)
+        changed = _osaka(5, "KDDI")
+        self.put("c.xlsx", "令和5年3月1日現在", changed)
+        self.put("d.xlsx", "令和5年4月1日現在", same)  # 一度変わった内容に戻る → 要注意
+        versions.select_versions(self.conn)
+        q06 = [c for c in checks.run_checks(self.conn, self.raw) if c.check_id == "Q06_duplicate_content"][0]
+        self.assertFalse(q06.passed)
+        self.assertEqual(len(q06.detail["same_content_not_adjacent"]), 1)

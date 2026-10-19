@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS diff_pair (
     old_date      TEXT NOT NULL,
     new_date      TEXT NOT NULL,
     computed_at   TEXT NOT NULL,
+    skipped_columns TEXT,                      -- 片方の版で全行空欄のため比較しなかった列
     UNIQUE (old_version, new_version),
     CHECK (old_date < new_date)
 );
@@ -98,6 +99,12 @@ CREATE TABLE IF NOT EXISTS diff_row (
     in_use_related  INTEGER NOT NULL CHECK (in_use_related IN (0, 1)),
     became_in_use   INTEGER NOT NULL CHECK (became_in_use IN (0, 1)),
     PRIMARY KEY (pair_id, area_code, local_code, change_kind)
+);
+
+-- 差分は原本から作り直せる派生データ。計算方法の版が変わったら作り直す
+CREATE TABLE IF NOT EXISTS diff_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
 
 -- 番号区画 → 市区町村（区画レベルの関係。町丁目での利用を意味しない）

@@ -82,16 +82,19 @@ def update(paths: DataPaths, *, config_dir: Path = CONFIG_DIR, online: bool = Tr
         decisions = versions.select_versions(conn)
         new_pairs = diff.compute_diffs(conn, layout["in_use_values"])
         conn.commit()
-        s = diff.summary(conn)
+        s = diff.summary(conn, bulk_min_rows=layout.get("bulk_min_rows", 30))
         manifest["stages"]["history"] = {
             "series": len({d["series"] for d in decisions}), "selected_versions": len(decisions),
             "content_differs": sum(d["reason"].startswith("content_differs") for d in decisions),
             "new_pairs": new_pairs, **{k: s[k] for k in ("pairs", "change_rows_gross", "in_use_related_rows_gross",
                                                           "distinct_codes_changed", "distinct_codes_became_in_use",
-                                                          "codes_changed_in_multiple_pairs", "kinds")}}
+                                                          "codes_changed_in_multiple_pairs", "kinds",
+                                                          "individual_changes", "bulk_changes",
+                                                          "pairs_with_skipped_columns")}}
 
         # 4. 品質検査
-        results = checks.run_checks(conn, paths.raw, min_pair_overlap=layout.get("min_pair_overlap", 0.5))
+        results = checks.run_checks(conn, paths.raw, min_pair_overlap=layout.get("min_pair_overlap", 0.5),
+                                    bulk_min_rows=layout.get("bulk_min_rows", 30))
         if errors:
             results.append(checks.Check("Q00_unknown_layout", "error", False, {"files": errors}))
         checks.record(conn, pid, results)
@@ -114,7 +117,7 @@ def update(paths: DataPaths, *, config_dir: Path = CONFIG_DIR, online: bool = Tr
 
         # 7. 出力
         if do_export:
-            res = export_all(conn, paths.exports / stamp)
+            res = export_all(conn, paths.exports / stamp, bulk_min_rows=layout.get("bulk_min_rows", 30))
             manifest["stages"]["export"] = {"dir": str(paths.exports / stamp), **res["reconciliation"]}
     except Exception as exc:  # 失敗も記録してから再送出する
         outcome = "failed"

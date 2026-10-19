@@ -1,6 +1,6 @@
 # 受入試験と完成判定基準
 
-テストは 49 件で、すべて合格しています（2026-10-19、Python 3.13）。
+テストは 55 件で、すべて合格しています（2026-10-19、Python 3.13）。
 
 - GIS 関連の 2 件は、geopandas・rasterio を入れた環境で合格しました。入れていない環境では skip になります。
 - テストはすべて合成データと模擬 HTTP 応答によるもので、**実データでの検証は未実施**です。
@@ -38,6 +38,9 @@
 | Q09 | 同一基準日で内容が違う版の選択理由 | `test_same_date_different_content_is_explained` |
 | Q10 | 4つの DB の整合性 | パイプラインの各テスト |
 | Q00 | 未知の表形式があれば分類に進まない | `test_unknown_layout_blocks_classification` |
+| 差分の列 | 片方の年に無い列（全行空欄）は比較せず、`skipped_columns` に記録 | `test_empty_column_is_not_compared` |
+| Q13 | 同じ「旧 → 新」が 30 行以上ある変更を「一括変更」として個別の変更と分けて数え、一覧を警告で出す | `test_bulk_rename_is_separated_from_individual_changes`、`test_changes_report` |
+| Q06（分割） | 隣り合う日付の同一内容は「変更なしの再掲」（情報）、それ以外は警告 | `test_unchanged_republication_is_info_not_warning` |
 | Q12 | 隣接する版の重なり率（両方にある局番の割合）が 50% 未満なら停止（別の表同士の比較の疑い） | `test_q12_blocks_comparison_of_unrelated_tables` |
 | 系統の決定 | ファイル名ではなく市外局番から地域を決める。複数地域のファイルは分割し、0120・050 などは別の系統にする | `test_numeric_id_filenames_do_not_mix_regions`、`test_one_file_with_two_regions_splits`、`test_non_geographic_numbers_get_their_own_series` |
 

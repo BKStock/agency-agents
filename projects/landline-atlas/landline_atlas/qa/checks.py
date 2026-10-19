@@ -24,7 +24,8 @@ class Check:
     detail: dict
 
 
-def run_checks(conn: sqlite3.Connection, raw_dir: Path, *, min_pair_overlap: float = 0.5) -> list[Check]:
+def run_checks(conn: sqlite3.Connection, raw_dir: Path, *, min_pair_overlap: float = 0.5,
+               bulk_min_rows: int = 30) -> list[Check]:
     out: list[Check] = []
 
     # Q01 比較組：同一系統・選択済みの版・基準日が隣接
@@ -39,10 +40,11 @@ def run_checks(conn: sqlite3.Connection, raw_dir: Path, *, min_pair_overlap: flo
                       "stale_pairs_not_used": len(computed - expected)}))
 
     # Q02/Q03 変更の内訳：延べと一意を分けて記録（情報）
-    s = diff.summary(conn)
+    s = diff.summary(conn, bulk_min_rows=bulk_min_rows)
     out.append(Check("Q02_Q03_change_breakdown", "info", True,
                      {k: s[k] for k in ("pairs", "change_rows_gross", "in_use_related_rows_gross",
-                                        "distinct_codes_changed", "distinct_codes_became_in_use", "kinds")}))
+                                        "distinct_codes_changed", "distinct_codes_became_in_use", "kinds",
+                                        "individual_changes", "bulk_changes", "pairs_with_skipped_columns")}))
 
     # Q04 同一行の複数期間計上・版内重複
     dups = [dict(r) for r in conn.execute(
@@ -59,14 +61,25 @@ def run_checks(conn: sqlite3.Connection, raw_dir: Path, *, min_pair_overlap: flo
                   for p in s["per_pair"] if p["change_rows"] and p["kinds"].get("cosmetic_only", 0) * 2 > p["change_rows"]]
     out.append(Check("Q05_format_change", "warning", not suspicious, {"pairs_mostly_cosmetic": suspicious}))
 
-    # Q06 同一原本・同一内容の重複計上
-    same = [dict(r) for r in conn.execute(
-        """SELECT v.content_sha256, COUNT(DISTINCT sv.as_of_date) AS dates, group_concat(sv.series || ':' || sv.as_of_date)
-                  AS where_used
-           FROM numbers.selected_version sv JOIN numbers.version v ON v.version_id = sv.version_id
-           GROUP BY v.content_sha256 HAVING dates > 1""")]
-    out.append(Check("Q06_duplicate_content", "warning", not same,
-                     {"same_content_selected_under_different_dates": same}))
+    # Q06 同一内容が別の日付で選ばれている。同じ系統で日付が隣り合うだけなら「変更なしの再掲」（情報）、
+    #     それ以外（別の系統、または一度変わった内容に戻る）は要注意（警告）
+    order = {series: [v for v in vids] for series, vids in selected.items()}
+    uses = defaultdict(list)
+    for r in conn.execute("""SELECT sv.series, sv.as_of_date, sv.version_id, v.content_sha256
+                             FROM numbers.selected_version sv JOIN numbers.version v ON v.version_id = sv.version_id
+                             ORDER BY sv.series, sv.as_of_date"""):
+        uses[r["content_sha256"]].append((r["series"], r["as_of_date"], r["version_id"]))
+    republished, suspicious_same = [], []
+    for content, where in uses.items():
+        if len(where) < 2:
+            continue
+        item = {"content_sha256": content, "where_used": [f"{s_}:{d}" for s_, d, _ in where]}
+        series_set = {w[0] for w in where}
+        idx = sorted(order[w[0]].index(w[2]) for w in where) if len(series_set) == 1 else []
+        contiguous = bool(idx) and idx == list(range(idx[0], idx[0] + len(idx)))
+        (republished if contiguous else suspicious_same).append(item)
+    out.append(Check("Q06_duplicate_content", "warning", not suspicious_same,
+                     {"same_content_not_adjacent": suspicious_same, "republished_unchanged": republished}))
 
     # Q07 取得失敗とリトライ
     fails = [dict(r) for r in conn.execute(
@@ -120,6 +133,11 @@ def run_checks(conn: sqlite3.Connection, raw_dir: Path, *, min_pair_overlap: flo
                         "old_rows": n_old, "new_rows": n_new, "common": both, "overlap": overlap})
     out.append(Check("Q12_pair_overlap", "error", not low,
                      {"min_pair_overlap": min_pair_overlap, "low_overlap_pairs": low}))
+
+    # Q13 一括変更：1つの組で同じ「旧 → 新」が多数。名称・表記・区画コードの一斉変更の疑いがあり、確認が必要
+    out.append(Check("Q13_bulk_transitions", "warning", not s["top_transitions"],
+                     {"bulk_min_rows": bulk_min_rows, "bulk_changes": s["bulk_changes"],
+                      "individual_changes": s["individual_changes"], "top": s["top_transitions"][:50]}))
 
     # 補正の可視化（先頭0の補い・結合セルの引継ぎ）
     repaired = {r[0]: r[1] for r in conn.execute(

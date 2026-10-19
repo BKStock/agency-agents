@@ -42,9 +42,17 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+# 既存DBに足りない列（スキーマ追加分）。CREATE TABLE IF NOT EXISTS は既存の表を変えないため
+ADDED_COLUMNS = {"numbers": [("diff_pair", "skipped_columns", "TEXT")]}
+
+
 def _apply_schema(path: Path, name: str) -> None:
     conn = sqlite3.connect(path)
     conn.executescript((SCHEMA_DIR / f"{name}.sql").read_text(encoding="utf-8"))
+    for table, column, decl in ADDED_COLUMNS.get(name, ()):
+        if column not in {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+    conn.commit()
     conn.close()
 
 

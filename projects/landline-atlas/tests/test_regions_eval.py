@@ -179,3 +179,41 @@ class GisTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UpgradeAndReportTest(unittest.TestCase):
+    def test_existing_db_gets_new_column(self):
+        import sqlite3
+        from landline_atlas.db.connection import connect
+        with tempfile.TemporaryDirectory() as tmp:
+            dbdir = Path(tmp) / "db"
+            dbdir.mkdir()
+            old = sqlite3.connect(dbdir / "numbers.sqlite3")
+            old.execute("CREATE TABLE diff_pair (pair_id INTEGER PRIMARY KEY AUTOINCREMENT, series TEXT NOT NULL,"
+                        " old_version INTEGER NOT NULL, new_version INTEGER NOT NULL, old_date TEXT NOT NULL,"
+                        " new_date TEXT NOT NULL, computed_at TEXT NOT NULL, UNIQUE (old_version, new_version))")
+            old.close()
+            conn = connect(dbdir)
+            cols = {r[1] for r in conn.execute("PRAGMA numbers.table_info(diff_pair)")}
+            self.assertIn("skipped_columns", cols)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM numbers.diff_meta").fetchone()[0], 0)
+            conn.close()
+
+    def test_changes_report(self):
+        import contextlib
+        import io
+        from support import xlsx
+        rows = lambda carrier: [["06", f"{6000 + i}", "A27-1", "大阪", carrier, "使用中"] for i in range(35)]
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            (d / "1.xlsx").write_bytes(xlsx("令和5年4月1日現在", rows("NTT西日本")))
+            (d / "2.xlsx").write_bytes(xlsx("令和6年4月1日現在", rows("西日本電信電話株式会社")))
+            data = str(d / "data")
+            atlas(["--data-dir", data, "update", "--offline", "--import", str(d / "1.xlsx"), "--import", str(d / "2.xlsx")])
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                self.assertEqual(atlas(["--data-dir", data, "changes-report"]), 0)
+            text = buf.getvalue()
+            self.assertIn("一括変更（同じ書き換えが 30 行以上）: 事業者変更 35", text)
+            self.assertIn("NTT西日本 → 西日本電信電話株式会社｜35", text)
+            self.assertTrue((d / "data" / "exports" / "changes_report" / "bulk_transitions.csv").exists())
