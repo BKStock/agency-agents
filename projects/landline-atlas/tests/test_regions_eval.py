@@ -215,5 +215,7 @@ class UpgradeAndReportTest(unittest.TestCase):
                 self.assertEqual(atlas(["--data-dir", data, "changes-report"]), 0)
             text = buf.getvalue()
             self.assertIn("一括変更（同じ書き換えが 30 行以上）: 事業者変更 35", text)
-            self.assertIn("NTT西日本 → 西日本電信電話株式会社｜35", text)
+            self.assertIn("事業者変更（社名変更・略称）｜NTT西日本 → 西日本電信電話株式会社｜35", text)
+            self.assertIn("事業者変更の内訳: 社名変更・略称 35", text)
+            self.assertIn("別の事業者への変化（本当の移転の候補。旧の値 → 新の値｜行数）\n  なし", text)
             self.assertTrue((d / "data" / "exports" / "changes_report" / "bulk_transitions.csv").exists())

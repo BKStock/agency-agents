@@ -368,3 +368,56 @@ class ApparentChangeTest(unittest.TestCase):
         q06 = [c for c in checks.run_checks(self.conn, self.raw) if c.check_id == "Q06_duplicate_content"][0]
         self.assertFalse(q06.passed)
         self.assertEqual(len(q06.detail["same_content_not_adjacent"]), 1)
+
+
+class CarrierClassificationTest(unittest.TestCase):
+    """実データの qa 結果（Q13）に出た事業者名の変化で確かめる。"""
+
+    def setUp(self):
+        from landline_atlas.history.carriers import CarrierMap
+        self.cm = CarrierMap.load(Path(__file__).parent.parent / "config" / "carriers.json")
+
+    def test_real_transitions(self):
+        cases = {
+            ("ＫＤＤＩ", "ＫＤＤＩ株式会社"): "notation",
+            ("ソフトバンク", "ソフトバンク株式会社"): "notation",
+            ("オプテージ", "株式会社オプテージ"): "notation",
+            ("ＮＴＴ東日本", "東日本電信電話株式会社"): "rename",
+            ("ＮＴＴ西日本", "西日本電信電話株式会社"): "rename",
+            ("西日本電信電話株式会社", "ＮＴＴ西日本株式会社"): "rename",
+            ("ソフトバンクモバイル", "ソフトバンク"): "rename",
+            ("ケイ・オプティコム", "オプテージ"): "rename",
+            ("ソフトバンクテレコム", "ソフトバンクモバイル"): "succession",
+            ("テクノロジーネットワークス", "ジュピターテレコム"): "succession",
+            ("東京テレメッセージ", None): "vacated",
+            (None, "ＫＤＤＩ"): "assigned",
+            ("ＮＴＴ東日本", "ＫＤＤＩ株式会社"): "transfer",
+        }
+        for (old, new), expected in cases.items():
+            with self.subTest(old=old, new=new):
+                self.assertEqual(self.cm.classify(old, new), expected)
+
+    def test_summary_separates_carrier_change_types(self):
+        from landline_atlas.history.carriers import CarrierMap
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = Path(tmp) / "raw"
+            conn = db(Path(tmp))
+            rows = lambda carriers: [["03", f"{3000 + i}", "A13-1", "東京", c, "使用中"] for i, c in enumerate(carriers)]
+            old = ["ＮＴＴ東日本"] * 35 + ["ＫＤＤＩ", "ソフトバンクテレコム", "東京テレメッセージ", "ＮＴＴ東日本"]
+            new = ["東日本電信電話株式会社"] * 35 + ["ＫＤＤＩ株式会社", "ソフトバンクモバイル", None, "ＫＤＤＩ"]
+            for name, text, carriers in (("a.xlsx", "令和元年5月21日現在", old), ("b.xlsx", "令和2年12月1日現在", new)):
+                sha, _ = archive.store(conn, raw, xlsx(text, rows(carriers)), url=f"https://x.invalid/{name}",
+                                       origin="official")
+                designation.ingest(conn, raw, sha, layout())
+            versions.select_versions(conn)
+            diff.compute_diffs(conn, layout()["in_use_values"])
+            s = diff.summary(conn, carriers=self.cm)
+            self.assertEqual(s["carrier_change_types"],
+                             {"rename": 35, "notation": 1, "succession": 1, "vacated": 1, "transfer": 1})
+            self.assertEqual(s["top_transitions"][0]["carrier_type"], "rename")
+            self.assertEqual(s["carrier_transfers"][0], {"old_value": "ＮＴＴ東日本", "new_value": "ＫＤＤＩ", "rows": 1})
+            # 対応表なしでも「株式会社」の有無などは書き方の違いとして判定される
+            plain = diff.summary(conn, carriers=CarrierMap())
+            self.assertEqual(plain["carrier_change_types"]["notation"], 1)
+            self.assertEqual(plain["carrier_change_types"]["transfer"], 37)
+            conn.close()

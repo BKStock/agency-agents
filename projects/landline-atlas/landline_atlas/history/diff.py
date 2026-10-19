@@ -12,6 +12,7 @@ from collections import Counter, defaultdict
 
 from ..db.connection import utc_now
 from ..normalize import compact
+from .carriers import CarrierMap
 
 _COMPARED = (("carrier", "carrier_changed"), ("usage_status", "status_changed"),
              ("number_area_code", "number_area_changed"))
@@ -101,12 +102,15 @@ def compute_diffs(conn: sqlite3.Connection, in_use_values: list[str]) -> int:
     return created
 
 
-def summary(conn: sqlite3.Connection, *, bulk_min_rows: int = 30) -> dict:
+def summary(conn: sqlite3.Connection, *, bulk_min_rows: int = 30, carriers: CarrierMap | None = None) -> dict:
     """差分の集計。延べ（変更行）と一意（局番の種類）を分ける。
 
     1つの組の中で同じ「旧の値 → 新の値」が bulk_min_rows 行以上ある変更は、名称・表記・区画コードの
     一斉変更（一括変更）として、個別の変更と分けて数える。生の行はそのまま残す。
+    事業者変更は carriers（config/carriers.json）で、書き方の違い・社名変更・合併による引継ぎ・
+    返却・指定・本当の移転に分ける（history/carriers.py）。
     """
+    carriers = carriers or CarrierMap()
     pairs = [dict(r) for r in conn.execute("SELECT * FROM numbers.diff_pair ORDER BY series, old_date")]
     current_pairs = {(s, a["version_id"], b["version_id"]) for s, a, b in adjacent_pairs(conn)}
     pairs = [p for p in pairs if (p["series"], p["old_version"], p["new_version"]) in current_pairs]
@@ -114,7 +118,7 @@ def summary(conn: sqlite3.Connection, *, bulk_min_rows: int = 30) -> dict:
     empty = {"pairs": 0, "per_pair": [], "kinds": {}, "change_rows_gross": 0, "in_use_related_rows_gross": 0,
              "distinct_codes_changed": 0, "distinct_codes_became_in_use": 0, "codes_changed_in_multiple_pairs": 0,
              "bulk_changes": {}, "individual_changes": {}, "top_transitions": [], "bulk_min_rows": bulk_min_rows,
-             "pairs_with_skipped_columns": 0}
+             "pairs_with_skipped_columns": 0, "carrier_change_types": {}, "carrier_transfers": []}
     if not ids:
         return empty
     marks = ",".join("?" * len(ids))
@@ -135,7 +139,9 @@ def summary(conn: sqlite3.Connection, *, bulk_min_rows: int = 30) -> dict:
             example.setdefault(k, (r["old_value"], r["new_value"]))
     top = sorted(({"series": by_pair[k[0]]["series"], "old_date": by_pair[k[0]]["old_date"],
                    "new_date": by_pair[k[0]]["new_date"], "kind": k[1], "old_value": example[k][0],
-                   "new_value": example[k][1], "rows": transitions[k]} for k in bulk_keys),
+                   "new_value": example[k][1], "rows": transitions[k],
+                   "carrier_type": carriers.classify(*example[k]) if k[1] == "carrier_changed" else None}
+                  for k in bulk_keys),
                  key=lambda t: (-t["rows"], t["series"], t["new_date"], t["kind"]))
 
     per_key_pair = {(r["pair_id"], r["area_code"], r["local_code"]): r for r in rows}
@@ -152,7 +158,14 @@ def summary(conn: sqlite3.Connection, *, bulk_min_rows: int = 30) -> dict:
                          "bulk_rows": sum(is_bulk(r) for r in prow),
                          "kinds": dict(Counter(r["change_kind"] for r in prow))})
     changed_pairs = Counter((k[1], k[2]) for k in per_key_pair)
+    carrier_rows = [r for r in rows if r["change_kind"] == "carrier_changed"]
+    types = Counter(carriers.classify(r["old_value"], r["new_value"]) for r in carrier_rows)
+    transfers = Counter((r["old_value"], r["new_value"]) for r in carrier_rows
+                        if carriers.classify(r["old_value"], r["new_value"]) == "transfer")
     return {
+        "carrier_change_types": dict(types),
+        "carrier_transfers": [{"old_value": o, "new_value": n, "rows": c}
+                              for (o, n), c in sorted(transfers.items(), key=lambda x: (-x[1], str(x[0])))][:100],
         "pairs": len(pairs),
         "per_pair": per_pair,
         "kinds": dict(Counter(r["change_kind"] for r in rows)),

@@ -31,7 +31,7 @@ def _write(out: Path, name: str, header: list[str], rows: list[list], files: dic
 
 
 def export_all(conn: sqlite3.Connection, out_dir: Path, *, prefecture: str | None = None, xlsx: bool = True,
-               bulk_min_rows: int = 30) -> dict:
+               bulk_min_rows: int = 30, carriers=None) -> dict:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     files: dict = {}
@@ -155,7 +155,7 @@ def export_all(conn: sqlite3.Connection, out_dir: Path, *, prefecture: str | Non
     _write(out, "09_designation_changes", ["series", "old_date", "new_date", "area_code", "local_code",
                                            "change_kind", "old_value", "new_value", "in_use_related",
                                            "became_in_use"], changes, files)
-    s = diff.summary(conn, bulk_min_rows=bulk_min_rows)
+    s = diff.summary(conn, bulk_min_rows=bulk_min_rows, carriers=carriers)
     _write(out, "09b_change_summary", ["metric", "value"],
            [["pairs", s["pairs"]], ["change_rows_gross", s["change_rows_gross"]],
             ["in_use_related_rows_gross", s["in_use_related_rows_gross"]],
@@ -165,7 +165,8 @@ def export_all(conn: sqlite3.Connection, out_dir: Path, *, prefecture: str | Non
             ["pairs_with_skipped_columns", s["pairs_with_skipped_columns"]],
             *[[f"kind_{k}", v] for k, v in sorted(s["kinds"].items())],
             *[[f"individual_{k}", v] for k, v in sorted(s["individual_changes"].items())],
-            *[[f"bulk_{k}", v] for k, v in sorted(s["bulk_changes"].items())]], files)
+            *[[f"bulk_{k}", v] for k, v in sorted(s["bulk_changes"].items())],
+            *[[f"carrier_{k}", v] for k, v in sorted(s["carrier_change_types"].items())]], files)
 
     # 10 都道府県別ダッシュボード
     dash = defaultdict(Counter)

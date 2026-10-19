@@ -17,6 +17,7 @@ from .db.connection import connect, utc_now
 from .discover import priority
 from .export.writer import export_all
 from .history import diff, versions
+from .history.carriers import CarrierMap
 from .ingest import designation
 from .paths import DataPaths
 from .qa import backup, checks
@@ -38,6 +39,7 @@ def update(paths: DataPaths, *, config_dir: Path = CONFIG_DIR, online: bool = Tr
     sources = _json(config_dir / "sources.json")
     layout = _json(config_dir / "layouts.json")
     rules = rules_mod.load(config_dir / "rules_v1.json")
+    carriers = CarrierMap.load(config_dir / "carriers.json")
     conn = connect(paths.db)
     manifest: dict = {"started_at": utc_now(), "data_dir": str(paths.root), "stages": {}}
     pid = conn.execute("INSERT INTO pipeline_run (started_at) VALUES (?)", (manifest["started_at"],)).lastrowid
@@ -82,7 +84,7 @@ def update(paths: DataPaths, *, config_dir: Path = CONFIG_DIR, online: bool = Tr
         decisions = versions.select_versions(conn)
         new_pairs = diff.compute_diffs(conn, layout["in_use_values"])
         conn.commit()
-        s = diff.summary(conn, bulk_min_rows=layout.get("bulk_min_rows", 30))
+        s = diff.summary(conn, bulk_min_rows=layout.get("bulk_min_rows", 30), carriers=carriers)
         manifest["stages"]["history"] = {
             "series": len({d["series"] for d in decisions}), "selected_versions": len(decisions),
             "content_differs": sum(d["reason"].startswith("content_differs") for d in decisions),
@@ -90,11 +92,11 @@ def update(paths: DataPaths, *, config_dir: Path = CONFIG_DIR, online: bool = Tr
                                                           "distinct_codes_changed", "distinct_codes_became_in_use",
                                                           "codes_changed_in_multiple_pairs", "kinds",
                                                           "individual_changes", "bulk_changes",
-                                                          "pairs_with_skipped_columns")}}
+                                                          "pairs_with_skipped_columns", "carrier_change_types")}}
 
         # 4. 品質検査
         results = checks.run_checks(conn, paths.raw, min_pair_overlap=layout.get("min_pair_overlap", 0.5),
-                                    bulk_min_rows=layout.get("bulk_min_rows", 30))
+                                    bulk_min_rows=layout.get("bulk_min_rows", 30), carriers=carriers)
         if errors:
             results.append(checks.Check("Q00_unknown_layout", "error", False, {"files": errors}))
         checks.record(conn, pid, results)
@@ -117,7 +119,8 @@ def update(paths: DataPaths, *, config_dir: Path = CONFIG_DIR, online: bool = Tr
 
         # 7. 出力
         if do_export:
-            res = export_all(conn, paths.exports / stamp, bulk_min_rows=layout.get("bulk_min_rows", 30))
+            res = export_all(conn, paths.exports / stamp, bulk_min_rows=layout.get("bulk_min_rows", 30),
+                             carriers=carriers)
             manifest["stages"]["export"] = {"dir": str(paths.exports / stamp), **res["reconciliation"]}
     except Exception as exc:  # 失敗も記録してから再送出する
         outcome = "failed"

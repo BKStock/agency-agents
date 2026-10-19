@@ -15,6 +15,7 @@ from .discover import priority
 from .evaluate.baselines import compare
 from .evidence import facilities
 from .export.writer import export_all
+from .history.carriers import CarrierMap
 from .ingest import areas, census
 from .link import relations
 from .pipeline import CONFIG_DIR, update
@@ -165,7 +166,8 @@ def cmd_qa(a):
     conn = _conn(a)
     layout = json.loads((a.config_dir / "layouts.json").read_text(encoding="utf-8"))
     res = checks.run_checks(conn, a.paths.raw, min_pair_overlap=layout.get("min_pair_overlap", 0.5),
-                            bulk_min_rows=layout.get("bulk_min_rows", 30))
+                            bulk_min_rows=layout.get("bulk_min_rows", 30),
+                            carriers=CarrierMap.load(a.config_dir / "carriers.json"))
     _print([c.__dict__ for c in res])
     return 1 if checks.blocking(res) else 0
 
@@ -174,16 +176,22 @@ KIND_JA = {"added": "追加", "removed": "削除", "carrier_changed": "事業者
            "number_area_changed": "番号区画変更", "cosmetic_only": "表記ゆれのみ"}
 
 
+CARRIER_TYPE_JA = {"notation": "書き方の違い", "rename": "社名変更・略称", "succession": "合併等の引継ぎ",
+                   "vacated": "事業者なし（返却など）", "assigned": "新たに指定", "transfer": "別の事業者へ"}
+
+
 def cmd_changes_report(a):
     """差分の内訳（個別の変更と一括変更）を CSV に出し、要点を画面に表示する。"""
     import csv
     from .history import diff
     layout = json.loads((a.config_dir / "layouts.json").read_text(encoding="utf-8"))
-    s = diff.summary(_conn(a, read_only=True), bulk_min_rows=layout.get("bulk_min_rows", 30))
+    s = diff.summary(_conn(a, read_only=True), bulk_min_rows=layout.get("bulk_min_rows", 30),
+                     carriers=CarrierMap.load(a.config_dir / "carriers.json"))
     out = Path(a.out) if a.out else a.paths.exports / "changes_report"
     out.mkdir(parents=True, exist_ok=True)
     with open(out / "bulk_transitions.csv", "w", newline="", encoding="utf-8-sig") as fh:
-        w = csv.DictWriter(fh, fieldnames=["series", "old_date", "new_date", "kind", "old_value", "new_value", "rows"])
+        w = csv.DictWriter(fh, fieldnames=["series", "old_date", "new_date", "kind", "old_value", "new_value", "rows",
+                                           "carrier_type"])
         w.writeheader()
         w.writerows(s["top_transitions"])
     with open(out / "per_pair.csv", "w", newline="", encoding="utf-8-sig") as fh:
@@ -193,16 +201,31 @@ def cmd_changes_report(a):
         for p in s["per_pair"]:
             w.writerow([p["series"], p["old_date"], p["new_date"], p["change_rows"], p["bulk_rows"],
                         p["in_use_related_rows"], p["skipped_columns"] or "", json.dumps(p["kinds"], ensure_ascii=False)])
+    def line_types(d):
+        return "、".join(f"{CARRIER_TYPE_JA.get(k, k)} {v:,}" for k, v in sorted(d.items(), key=lambda x: -x[1])) or "なし"
+
     def line(d):
         return "、".join(f"{KIND_JA.get(k, k)} {v:,}" for k, v in sorted(d.items(), key=lambda x: -x[1])) or "なし"
     print(f"比較した組: {s['pairs']}（片方の年に無い列を比べなかった組: {s['pairs_with_skipped_columns']}）")
     print(f"個別の変更: {line(s['individual_changes'])}")
     print(f"一括変更（同じ書き換えが {s['bulk_min_rows']} 行以上）: {line(s['bulk_changes'])}")
     print(f"新たに使用中になった局番: {s['distinct_codes_became_in_use']:,} 種類")
+    print(f"事業者変更の内訳: {line_types(s['carrier_change_types'])}")
+    with open(out / "carrier_transfers.csv", "w", newline="", encoding="utf-8-sig") as fh:
+        w = csv.DictWriter(fh, fieldnames=["old_value", "new_value", "rows"])
+        w.writeheader()
+        w.writerows(s["carrier_transfers"])
     print("\n一括変更の上位（系統 旧の日付→新の日付｜種別｜旧の値 → 新の値｜行数）")
     for t in s["top_transitions"][:a.top]:
-        print(f"  {t['series']} {t['old_date']}→{t['new_date']}｜{KIND_JA.get(t['kind'], t['kind'])}｜"
-              f"{t['old_value']} → {t['new_value']}｜{t['rows']:,}")
+        label = KIND_JA.get(t["kind"], t["kind"])
+        if t.get("carrier_type"):
+            label += f"（{CARRIER_TYPE_JA[t['carrier_type']]}）"
+        print(f"  {t['series']} {t['old_date']}→{t['new_date']}｜{label}｜{t['old_value']} → {t['new_value']}｜{t['rows']:,}")
+    print("\n別の事業者への変化（本当の移転の候補。旧の値 → 新の値｜行数）")
+    for t in s["carrier_transfers"][:a.top]:
+        print(f"  {t['old_value']} → {t['new_value']}｜{t['rows']:,}")
+    if not s["carrier_transfers"]:
+        print("  なし")
     skipped = [p for p in s["per_pair"] if p["skipped_columns"]]
     if skipped:
         print("\n比べなかった列がある組（系統 旧の日付→新の日付｜列）")

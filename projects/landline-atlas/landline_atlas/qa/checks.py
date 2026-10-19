@@ -25,7 +25,7 @@ class Check:
 
 
 def run_checks(conn: sqlite3.Connection, raw_dir: Path, *, min_pair_overlap: float = 0.5,
-               bulk_min_rows: int = 30) -> list[Check]:
+               bulk_min_rows: int = 30, carriers=None) -> list[Check]:
     out: list[Check] = []
 
     # Q01 比較組：同一系統・選択済みの版・基準日が隣接
@@ -40,11 +40,12 @@ def run_checks(conn: sqlite3.Connection, raw_dir: Path, *, min_pair_overlap: flo
                       "stale_pairs_not_used": len(computed - expected)}))
 
     # Q02/Q03 変更の内訳：延べと一意を分けて記録（情報）
-    s = diff.summary(conn, bulk_min_rows=bulk_min_rows)
+    s = diff.summary(conn, bulk_min_rows=bulk_min_rows, carriers=carriers)
     out.append(Check("Q02_Q03_change_breakdown", "info", True,
                      {k: s[k] for k in ("pairs", "change_rows_gross", "in_use_related_rows_gross",
                                         "distinct_codes_changed", "distinct_codes_became_in_use", "kinds",
-                                        "individual_changes", "bulk_changes", "pairs_with_skipped_columns")}))
+                                        "individual_changes", "bulk_changes", "pairs_with_skipped_columns",
+                                        "carrier_change_types")}))
 
     # Q04 同一行の複数期間計上・版内重複
     dups = [dict(r) for r in conn.execute(
@@ -137,7 +138,8 @@ def run_checks(conn: sqlite3.Connection, raw_dir: Path, *, min_pair_overlap: flo
     # Q13 一括変更：1つの組で同じ「旧 → 新」が多数。名称・表記・区画コードの一斉変更の疑いがあり、確認が必要
     out.append(Check("Q13_bulk_transitions", "warning", not s["top_transitions"],
                      {"bulk_min_rows": bulk_min_rows, "bulk_changes": s["bulk_changes"],
-                      "individual_changes": s["individual_changes"], "top": s["top_transitions"][:50]}))
+                      "individual_changes": s["individual_changes"], "carrier_change_types": s["carrier_change_types"],
+                      "top": s["top_transitions"][:50]}))
 
     # 補正の可視化（先頭0の補い・結合セルの引継ぎ）
     repaired = {r[0]: r[1] for r in conn.execute(

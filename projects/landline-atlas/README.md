@@ -12,7 +12,7 @@
 
 > **状態**
 > - 作成環境では、soumu.go.jp・e-stat.go.jp・web.archive.org への接続がネットワーク方針で拒否されました。そのため、**実データでの取得・解析はまだ一度も行っていません**。
-> - テスト（55件）はすべて、合成データと模擬 HTTP 応答によるものです。総務省の表の実際の見出し・ファイル名規則・使用中の表記は未確認です。初回実行時に `config/layouts.json`・`config/sources.json` を実ファイルに合わせて確認してください（[docs/operations.md](docs/operations.md)）。
+> - テスト（57件）はすべて、合成データと模擬 HTTP 応答によるものです。総務省の表の実際の見出し・ファイル名規則・使用中の表記は未確認です。初回実行時に `config/layouts.json`・`config/sources.json` を実ファイルに合わせて確認してください（[docs/operations.md](docs/operations.md)）。
 > - 12分類のルールは全分類が未承認のため、**確定は出力されません**。
 
 ## 何をするか
