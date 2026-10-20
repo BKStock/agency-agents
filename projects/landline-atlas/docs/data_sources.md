@@ -13,6 +13,17 @@
 | 同上の過去版 | Internet Archive（CDX API `https://web.archive.org/cdx/search/cdx`、再生 `.../web/<時刻>id_/<URL>`） | 版 | 時系列 | 3秒以上の間隔を空け、robots を遵守する。CDX の `collapse=digest` で内容の重複を避け、取得済みの時刻は再取得しない |
 | 番号区画（MA）→市区町村 | 総務省「市外局番の一覧」等をもとに作る CSV（`atlas import-number-areas`） | 区画×市区町村 | `numbers.number_area_municipality` | 区画が市区町村の一部だけを含む場合は `coverage=part` とする |
 
+## 国勢調査の自動取得（`atlas fetch-census`）で使う情報と確認状況
+
+| 項目 | 内容 | 確認状況 |
+|---|---|---|
+| 境界データの URL | `statmap-search/data?dlserveyId=A002005212020&code=<都道府県>&coordSys=1&format=shape&downloadType=5&datum=2011`（解説記事による） | 未確認 |
+| 統計表の URL | `statmap-search/data?statsId=<表ID>&code=<都道府県>&downloadType=2`。取れなければ一覧ページからリンクを探す | 未確認 |
+| T001081 | 男女別人口総数及び世帯総数（2020・町丁・字等）。e-Stat の項目定義書で確認 | 定義書のみ確認 |
+| T001082 | 年齢（5歳階級、4区分）別、男女別人口（2020・町丁・字等）。定義書で確認 | 定義書のみ確認 |
+| T001085 | 住宅の所有の関係別一般世帯数（町丁・字等）と思われる | 未確認 |
+| 住宅の建て方（町丁・字等・2020） | 表 ID は不明 | 未確認 |
+
 ## 地域統計（B0）
 
 | データ | 取得先 | 粒度・年次 | 特徴量 | 注意 |

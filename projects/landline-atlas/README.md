@@ -11,7 +11,7 @@
 - 検索画面と Excel/CSV 出力
 
 > **状態**
-> - 最初の作成環境では、soumu.go.jp・e-stat.go.jp・web.archive.org への接続がネットワーク方針で拒否されました。総務省の原本はその後 Mac 上で取得しています。e-Stat の小地域データはまだ取り込んでいません。
+> - 最初の作成環境では、soumu.go.jp・e-stat.go.jp・web.archive.org への接続がネットワーク方針で拒否されました。総務省の原本はその後 Mac 上で取得しています。e-Stat の小地域データは `atlas fetch-census` で取得します（手順は [docs/operations.md](docs/operations.md)）。
 > - テストは、合成データと模擬 HTTP 応答によるものです（実データで出た事例を合成データに写したものを含む）。
 > - 2026-10-20 に、Mac 上で取得済みの総務省の原本（固定電話 9 系統の過去版を含む）に対して `atlas update --offline` が `outcome: ok` で通りました（固定電話以外の表は対象外として飛ばす。[docs/operations.md](docs/operations.md)）。町丁目マスタは未取込のため、分類はまだ行っていません。
 > - 12分類のルールは全分類が未承認のため、**確定は出力されません**。
@@ -40,6 +40,8 @@ python -m unittest discover -s tests
 atlas init                                   # 既定のデータ置き場は ~/landline_atlas_data
 atlas update --wayback                       # 取得 → … → 出力 → バックアップ
 atlas update --offline --import ~/Downloads/06.xls      # 手元の原本を取り込む（元ファイルは変更しない）
+atlas fetch-census --pref 27 --probe                    # e-Stat の国勢調査を確認だけ（DBに書かない）
+atlas fetch-census --pref 27                            # 取得して町丁目マスタ・特徴量に取り込む
 atlas import-census --mapping config/estat_mapping.example.json \
   --towns towns.csv --features pop.csv --source-id census2020 \
   --census-year 2020 --boundary-version estat-2020

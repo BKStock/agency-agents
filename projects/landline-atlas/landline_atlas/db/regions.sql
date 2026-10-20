@@ -165,3 +165,19 @@ CREATE TRIGGER IF NOT EXISTS trg_axis_no_update BEFORE UPDATE ON axis_result
 BEGIN SELECT RAISE(ABORT, 'axis_result is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS trg_axis_no_delete BEFORE DELETE ON axis_result
 BEGIN SELECT RAISE(ABORT, 'axis_result is append-only'); END;
+
+-- 国勢調査などの原本（ZIP）。内容の SHA-256 で一意。番号側の原本とは分けて保管する
+CREATE TABLE IF NOT EXISTS raw_census (
+    sha256       TEXT NOT NULL,
+    url          TEXT NOT NULL,
+    filename     TEXT,
+    stored_path  TEXT NOT NULL,
+    item         TEXT NOT NULL,      -- boundary / 表 ID（例 T001081）
+    prefecture   TEXT NOT NULL,
+    fetched_at   TEXT NOT NULL,
+    PRIMARY KEY (sha256, url)
+);
+CREATE TRIGGER IF NOT EXISTS trg_rawc_no_update BEFORE UPDATE ON raw_census
+BEGIN SELECT RAISE(ABORT, 'raw_census is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS trg_rawc_no_delete BEFORE DELETE ON raw_census
+BEGIN SELECT RAISE(ABORT, 'raw_census is append-only'); END;
