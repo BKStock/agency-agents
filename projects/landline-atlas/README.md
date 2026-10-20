@@ -13,7 +13,7 @@
 > **状態**
 > - 最初の作成環境では、soumu.go.jp・e-stat.go.jp・web.archive.org への接続がネットワーク方針で拒否されました。総務省の原本はその後 Mac 上で取得しています。e-Stat の小地域データは `atlas fetch-census` で取得します（手順は [docs/operations.md](docs/operations.md)）。
 > - テストは、合成データと模擬 HTTP 応答によるものです（実データで出た事例を合成データに写したものを含む）。
-> - 2026-10-20 に、Mac 上で取得済みの総務省の原本（固定電話 9 系統の過去版を含む）に対して `atlas update --offline` が `outcome: ok` で通りました（固定電話以外の表は対象外として飛ばす。[docs/operations.md](docs/operations.md)）。同日、e-Stat から 2020 年小地域（大阪府・岩手県・長野県・高知県）を取り込み、最初の分類 run を作りました。GIS・地価・外部証拠が未取得のため、ほとんどの分類は「資料不足」です。
+> - 2026-10-20 に、Mac 上で取得済みの総務省の原本（固定電話 9 系統の過去版を含む）に対して `atlas update --offline` が `outcome: ok` で通りました（固定電話以外の表は対象外として飛ばす。[docs/operations.md](docs/operations.md)）。同日、e-Stat から 2020 年小地域（大阪府・岩手県・長野県・高知県）を取り込み、最初の分類 run を作りました。続けて同じ4府県で `atlas fetch-gis`（DID・用途地域・土地利用・地価公示・農業集落・標高傾斜）を取り込み、2 回目の分類 run を作りました。漁業集落・三大都市圏／都市雇用圏・二次的住宅比率・外部証拠は未取得なので、R4〜R6・L2・L4〜L6 は「資料不足」のままです。
 > - 12分類のルールは全分類が未承認のため、**確定は出力されません**。
 
 ## 何をするか
@@ -42,6 +42,8 @@ atlas update --wayback                       # 取得 → … → 出力 → バ
 atlas update --offline --import ~/Downloads/06.xls      # 手元の原本を取り込む（元ファイルは変更しない）
 atlas fetch-census --pref 27 --probe                    # e-Stat の国勢調査を確認だけ（DBに書かない）
 atlas fetch-census --pref 27                            # 取得して町丁目マスタ・特徴量に取り込む
+atlas fetch-gis --pref 27 --probe                       # 国土数値情報・農業集落境界を確認だけ（DBに書かない）
+atlas fetch-gis --pref 27                               # GIS 特徴量（DID・用途地域・土地利用・地価・農業集落・標高）を取り込む
 atlas import-census --mapping config/estat_mapping.example.json \
   --towns towns.csv --features pop.csv --source-id census2020 \
   --census-year 2020 --boundary-version estat-2020

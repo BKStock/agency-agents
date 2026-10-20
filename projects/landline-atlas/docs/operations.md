@@ -5,7 +5,7 @@
 ```bash
 cd projects/landline-atlas
 python3 -m venv .venv && . .venv/bin/activate
-pip install -e '.[excel]'
+pip install -e '.[excel]'      # GIS 特徴量（fetch-gis）も作るなら '.[excel,gis]'
 python -m unittest discover -s tests
 atlas init      # ~/landline_atlas_data（変える場合は --data-dir か LANDLINE_ATLAS_DATA）
 ```
@@ -97,6 +97,25 @@ atlas classify --census-year 2020 --boundary-version estat-2020
 - 住宅の建て方は T001086（住宅の建て方別主世帯数）から取ります。戸建率・共同住宅率の分母は同じ表の主世帯数です。
 - 町丁・字等の所有関係の表（T001085）には公営等の借家・給与住宅の列がありません。そのため、借家率・公営借家率を使う分類（R4・R5）は「資料不足」になります。
 - 秘匿は表ごとに付きます（人口総数の表には秘匿が無い）。`--probe` の「秘匿（全ての表を合わせて判定）」で件数を確認します。表の間で秘匿の状態が食い違うときは、取り込まずに停止します。
+
+## GIS 特徴量を取得する
+
+```bash
+atlas fetch-gis --pref 27 --probe   # 取得・属性の確認・計算まで（DB にもディスクにも書かない）
+atlas fetch-gis --pref 27           # 原本を raw/gis に保管し、特徴量を取り込む
+atlas fetch-gis --pref 27 --datasets did,zoning   # 一部のデータだけ（取り直しなど）
+atlas classify --census-year 2020 --boundary-version estat-2020
+```
+
+- 先に `atlas fetch-census` で同じ都道府県の小地域境界を取り込んでおきます。町丁目の形はその原本（raw/census）から読みます。
+- 取得先・属性・コードは `config/gis_sources.json` にあります。属性名・コード・座標系・年が書いてあるものと違えば、どのデータも取り込まずに停止します。新しい年版に替えるときは、定義書でコードを確かめてから config を直してください。
+- 原本はデータセットごとに SHA-256 で保管し（`regions.raw_gis`）、出典と利用条件を `source_document` に記録します。メッシュ単位のデータは、その都道府県で使ったファイルを束ねた出典を1つ作り、特徴量はそれを指します。
+- 取り込みは毎回新しい load として追記します。前の値は消えず、分類は町丁目・特徴量ごとに最新の load を使います。
+- missing になるのは次の町丁目です。
+  - 用途地域：その市区町村の用途地域ファイルが配布されていない（公開不可・資料の提供なし・用途地域なしを区別できない）
+  - 地価：町丁目の中に地価公示の地点が無い
+  - そのほか：町丁目の面積のうち値が分かっている部分が `min_coverage` 未満（水面の調査区、海岸線の描き方の違い、農業集落の区分が定義書から決まらない部分など）
+- 用途地域は市区町村ごとに利用条件が違います（`Situation_of_the_data_collection_RestrictedZoneData.pdf`）。出力を外に出す前に確認してください。
 
 ## 差分の内訳を確認する
 

@@ -69,6 +69,23 @@ def cmd_fetch_census(a):
     return 1 if report["stopped"] else 0
 
 
+def cmd_fetch_gis(a):
+    from . import gis_fetch
+    cfg = gis_fetch.load_config(a.config_dir)
+    a.paths.ensure()
+    conn = _conn(a)
+    sources = json.loads((a.config_dir / "sources.json").read_text(encoding="utf-8"))
+    datasets = [d.strip() for d in a.datasets.split(",")] if a.datasets else None
+    report = gis_fetch.run(conn, a.paths.raw, cfg, a.pref, probe=a.probe, user_agent=sources["user_agent"],
+                           datasets=datasets)
+    if not a.probe and not report["stopped"]:
+        conn.commit()
+    else:
+        conn.rollback()
+    print(gis_fetch.render(report))
+    return 1 if report["stopped"] else 0
+
+
 def cmd_import_census(a):
     conn = _conn(a)
     mapping = census.load_mapping(a.mapping)
@@ -292,6 +309,10 @@ def parser() -> argparse.ArgumentParser:
     s = add("fetch-census", cmd_fetch_census, "e-Stat から国勢調査（小地域）を自動で取得して取り込む")
     s.add_argument("--pref", required=True, help="都道府県コード（例 27＝大阪府）")
     s.add_argument("--probe", action="store_true", help="確認だけ（DBに書き込まない）")
+    s = add("fetch-gis", cmd_fetch_gis, "国土数値情報・農業集落境界から町丁目の GIS 特徴量を作って取り込む")
+    s.add_argument("--pref", required=True, help="都道府県コード（先に fetch-census で境界を取得しておく）")
+    s.add_argument("--probe", action="store_true", help="取得と属性の確認だけ（DBに書き込まない）")
+    s.add_argument("--datasets", help="一部だけ処理する（例 did,zoning）。既定は config/gis_sources.json の全て")
     s = add("import-census", cmd_import_census, "e-Stat 小地域の町丁目マスタ・特徴量を取込")
     s.add_argument("--mapping", required=True)
     s.add_argument("--towns")

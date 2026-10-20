@@ -181,3 +181,19 @@ CREATE TRIGGER IF NOT EXISTS trg_rawc_no_update BEFORE UPDATE ON raw_census
 BEGIN SELECT RAISE(ABORT, 'raw_census is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS trg_rawc_no_delete BEFORE DELETE ON raw_census
 BEGIN SELECT RAISE(ABORT, 'raw_census is append-only'); END;
+
+-- GIS の原本（国土数値情報・農業集落境界の ZIP）。unit は都道府県コードか1次メッシュコード
+CREATE TABLE IF NOT EXISTS raw_gis (
+    sha256       TEXT NOT NULL,
+    url          TEXT NOT NULL,
+    stored_path  TEXT NOT NULL,
+    dataset      TEXT NOT NULL,      -- config/gis_sources.json の datasets のキー（例 did）
+    unit         TEXT NOT NULL,
+    prefecture   TEXT NOT NULL,      -- 取得のきっかけになった都道府県
+    fetched_at   TEXT NOT NULL,
+    PRIMARY KEY (sha256, url, prefecture)
+);
+CREATE TRIGGER IF NOT EXISTS trg_rawg_no_update BEFORE UPDATE ON raw_gis
+BEGIN SELECT RAISE(ABORT, 'raw_gis is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS trg_rawg_no_delete BEFORE DELETE ON raw_gis
+BEGIN SELECT RAISE(ABORT, 'raw_gis is append-only'); END;

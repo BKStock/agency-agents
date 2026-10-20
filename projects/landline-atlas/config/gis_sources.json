@@ -1,0 +1,237 @@
+{
+  "_note": "atlas fetch-gis の取得先と属性。URL・ファイル名・属性名・コードは 2026-10-20 に各データの配布ページ・定義書・高知県（39）の実ファイルで確認した（verified: true）。属性やコードがここに書いたものと違えば、取り込まずに停止する。",
+  "census_year": 2020,
+  "boundary_version": "estat-2020",
+  "towns": {
+    "_note": "町丁目の形は fetch-census が raw/census に保存した e-Stat 小地域境界（Shapefile）から読む。同じ KEY_CODE の複数の図形（飛び地）は1つにまとめる。KEY_CODE が都道府県コードだけの図形（町丁目に属さない区域）は除いて件数を表示する。",
+    "key_field": "KEY_CODE",
+    "encoding": "cp932",
+    "municipality_name_field": "CITY_NAME"
+  },
+  "min_coverage": {
+    "_note": "町丁目の面積のうち、そのデータで値が分かっている部分の割合がこれ未満なら missing にする（海岸線や境界の描き方の違いによる細い隙間を許すため 1 にはしない）。",
+    "default": 0.95
+  },
+  "datasets": {
+    "did": {
+      "name": "国土数値情報 人口集中地区データ（令和2年）A16-20",
+      "page": "https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-A16-2020.html",
+      "unit": "pref",
+      "url_template": "https://nlftp.mlit.go.jp/ksj/gml/data/A16/A16-20/A16-20_{pref}_GML.zip",
+      "member": "A16-20_{pref}_DID.shp",
+      "expect_crs": "EPSG:6668",
+      "fields": [
+        "A16_001",
+        "A16_002",
+        "A16_011"
+      ],
+      "must_equal": {
+        "A16_011": "2020"
+      },
+      "municipality_field": "A16_002",
+      "features": {
+        "did_flag": {
+          "min_share": 0.5
+        }
+      },
+      "_semantics": "町丁目の面積のうち DID に入る割合が 0.5 以上なら 1、未満なら 0。A16 は都道府県の全域を対象とするので、取得範囲外（missing）は生じない。",
+      "source_year": 2020,
+      "license": "国土数値情報ダウンロードサイトコンテンツ利用規約（政府標準利用規約準拠版）。使用許諾条件：1995年以降は商用可。出典：国土交通省 国土数値情報（人口集中地区データ）を加工して作成",
+      "verified": true
+    },
+    "zoning": {
+      "name": "国土数値情報 用途地域データ（令和元年度）A29-19",
+      "page": "https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-A29-2019.html",
+      "unit": "pref",
+      "url_template": "https://nlftp.mlit.go.jp/ksj/gml/data/A29/A29-19/A29-19_{pref}_GML.zip",
+      "member_regex": "A29-19_(\\d{5})\\.shp$",
+      "expect_crs": "EPSG:6668",
+      "fields": [
+        "A29_001",
+        "A29_003",
+        "A29_004",
+        "A29_005"
+      ],
+      "municipality_field": "A29_001",
+      "class_field": "A29_004",
+      "codes": {
+        "residential": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "21"
+        ],
+        "commercial": [
+          "8",
+          "9"
+        ],
+        "industrial": [
+          "10",
+          "11",
+          "12"
+        ],
+        "unknown": [
+          "99"
+        ]
+      },
+      "features": {
+        "zoning_residential_ratio": {
+          "codes": "residential"
+        },
+        "zoning_commercial_ratio": {
+          "codes": "commercial"
+        }
+      },
+      "_codes": "UseDistrictCd（用途地域コード）：1 第一種低層住居専用〜7 準住居・21 田園住居＝住居系、8 近隣商業・9 商業＝商業系、10 準工業・11 工業・12 工業専用＝工業系、99 不明",
+      "_semantics": "町丁目の面積のうち住居系・商業系の用途地域に入る割合。用途地域のファイルがある市区町村だけを取得範囲とし、ファイルの無い市区町村（公開不可・資料の提供なし・用途地域なしを区別できない）の町丁目は missing にする。政令指定都市は市の単位で配布される（例 27140 堺市）ので、名前が「市の名前（A29_003）＋…区」の区（e-Stat 境界の CITY_NAME、例 堺市堺区）は市のファイルで覆われるとする。99（不明）の部分は値が分からない部分として扱う。",
+      "source_year": 2019,
+      "license": "国土数値情報ダウンロードサイトコンテンツ利用規約（政府標準利用規約準拠版）。使用許諾条件：2019年度はオープンデータ（CC BY 4.0（一部制限））。各市区町村で定められた利用条件（Situation_of_the_data_collection_RestrictedZoneData.pdf：公開不可・条件付き・再配信不可など）も守る。出典：国土交通省 国土数値情報（用途地域データ）を加工して作成",
+      "verified": true,
+      "municipality_name_field": "A29_003"
+    },
+    "landuse": {
+      "name": "国土数値情報 土地利用細分メッシュ（令和3年度）L03-b-21",
+      "page": "https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-L03-b-2021.html",
+      "unit": "mesh1",
+      "mesh_regex": "L03-b-21_(\\d{4})-jgd2011_GML\\.zip",
+      "url_template": "https://nlftp.mlit.go.jp/ksj/gml/data/L03-b/L03-b-21/L03-b-21_{mesh}-jgd2011_GML.zip",
+      "member": "L03-b-21_{mesh}.shp",
+      "expect_crs": "EPSG:6668",
+      "fields": [
+        "L03b_001",
+        "L03b_002"
+      ],
+      "class_field": "L03b_002",
+      "codes": {
+        "farmland": [
+          "0100",
+          "0200"
+        ],
+        "forest": [
+          "0500"
+        ],
+        "other": [
+          "0600",
+          "0700",
+          "0901",
+          "0902",
+          "1000",
+          "1100",
+          "1400",
+          "1500",
+          "1600"
+        ]
+      },
+      "features": {
+        "farmland_ratio": {
+          "codes": "farmland"
+        },
+        "forest_ratio": {
+          "codes": "forest"
+        }
+      },
+      "_codes": "土地利用種別コード（LandUseCd-09、2021年度版）：0100 田・0200 その他の農用地＝農地、0500 森林、0600 荒地、0700 建物用地、0901 道路、0902 鉄道、1000 その他の用地、1100 河川地及び湖沼、1400 海浜、1500 海水域、1600 ゴルフ場",
+      "_semantics": "町丁目の面積のうち農地・森林のセルに入る割合。配布の一覧に無い1次メッシュ（海だけの区画）は取得範囲外。",
+      "source_year": 2021,
+      "license": "国土数値情報ダウンロードサイトコンテンツ利用規約（政府標準利用規約準拠版）。使用許諾条件：オープンデータ（CC BY 4.0）。出典：国土交通省 国土数値情報（土地利用細分メッシュデータ）を加工して作成",
+      "verified": true
+    },
+    "land_price": {
+      "name": "国土数値情報 地価公示（令和2年）L01-20",
+      "page": "https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-L01-2026.html",
+      "unit": "pref",
+      "url_template": "https://nlftp.mlit.go.jp/ksj/gml/data/L01/L01-20//L01-20_{pref}_GML.zip",
+      "member": "L01-20_{pref}_GML/L01-20_{pref}.shp",
+      "expect_crs": "EPSG:4612",
+      "fields": [
+        "L01_005",
+        "L01_006",
+        "L01_021"
+      ],
+      "must_equal": {
+        "L01_005": "2020"
+      },
+      "value_field": "L01_006",
+      "features": {
+        "land_price_pref_pct": {}
+      },
+      "_fields": "2020年版の GML（L01-20）で確認：L01_005＝年度、L01_006＝公示価格（円/m²）、L01_021＝行政区域コード。配布中の shape_property_table2.xlsx は 2026 年版の並びで、L01_006 の意味が違うので使わない。",
+      "_semantics": "町丁目に入る地点の公示価格の中央値を、都道府県内の地点のある町丁目の中で順位にして 0（最低）〜1（最高）。地点の無い町丁目は missing。国勢調査と同じ 2020 年の版を使う。",
+      "source_year": 2020,
+      "license": "国土数値情報ダウンロードサイトコンテンツ利用規約（政府標準利用規約準拠版）。使用許諾条件：2019年以降はオープンデータ（CC BY 4.0）。出典：国土交通省 国土数値情報（地価公示データ）を加工して作成",
+      "verified": true
+    },
+    "agri_settlement": {
+      "name": "農林水産省 2020年農林業センサス 農業集落境界データ",
+      "page": "https://www.maff.go.jp/j/tokei/census/shuraku_data/2020/ma/index.html",
+      "terms_page": "https://www.maff.go.jp/j/tokei/census/shuraku_data/index.html",
+      "unit": "pref",
+      "url_template": "https://www.machimura.maff.go.jp/shurakudata/2020/ma/MA0001_2020_2020_{pref}.zip",
+      "member": "MA0001_2020_2020_{pref}/rcom.shp",
+      "encoding": "cp932",
+      "expect_crs": "EPSG:4612",
+      "fields": [
+        "KEY",
+        "PREF",
+        "CITY",
+        "KCITY",
+        "RCOM",
+        "HININTEI"
+      ],
+      "settlement_field": "RCOM",
+      "not_recognized_codes": [
+        "999",
+        "-99"
+      ],
+      "flag_field": "HININTEI",
+      "flag_values": [
+        "0",
+        "1"
+      ],
+      "features": {
+        "agri_settlement_overlap": {}
+      },
+      "_codes": "利用の手引き（riyou-21.pdf）：RCOM が 999 や -99 の区域は「水面や自衛隊の演習地などで農業集落として認定されていない地域」。HININTEI はデータ形式の表（index-2.xlsx）に無い属性で、高知県では 999・-99 の全図形が 1。999・-99 以外で HININTEI が 1 の図形（高知県では RCOM 901〜904 の埋立地）は、農業集落かどうかが定義書から決められないため、値が分からない部分として扱う。HININTEI が 0 なのに RCOM が 999・-99 の図形があれば停止する。",
+      "_semantics": "町丁目の面積のうち、農業集落として認定された区域に入る割合。認定されていない区域（999・-99）は 0 として数え、意味の決まらない図形の部分は値が分からない部分にする。",
+      "source_year": 2020,
+      "license": "「地域の農業を見て・知って・活かすDB」は、どなたでも複製、公衆送信、翻訳・変換等の翻案等、自由に利用できる。利用時は出典を明示し、編集・加工した場合は編集・加工者も明示する（農林水産省「地域の農業を見て・知って・活かすDB」利用上の注意）。出典：農林水産省「2020年農林業センサス 農業集落境界データ」を加工して作成",
+      "verified": true
+    },
+    "elevation": {
+      "name": "国土数値情報 標高・傾斜度5次メッシュ（平成23年度）G04-d-11",
+      "page": "https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-G04-d.html",
+      "unit": "mesh1",
+      "mesh_regex": "G04-d-11_(\\d{4})-jgd_GML\\.zip",
+      "url_template": "https://nlftp.mlit.go.jp/ksj/gml/data/G04-d/G04-d-11/G04-d-11_{mesh}-jgd_GML.zip",
+      "member": "G04-d-11_{mesh}-jgd_ElevationAndSlopeAngleFifthMesh.shp",
+      "crs_if_missing": "EPSG:4612",
+      "_crs": "Shapefile に .prj が無い。配布ページの座標系は JGD2000（B, L）なので EPSG:4612 として読む。",
+      "fields": [
+        "G04d_001",
+        "G04d_002",
+        "G04d_010"
+      ],
+      "invalid_values": [
+        "unknown"
+      ],
+      "features": {
+        "elevation_mean_m": {
+          "value_field": "G04d_002"
+        },
+        "slope_mean_deg": {
+          "value_field": "G04d_010"
+        }
+      },
+      "_fields": "G04d_002＝平均標高（m）、G04d_010＝平均傾斜角度（度）。値が unknown のセルは除く。250m メッシュ（5次メッシュ）がこのデータでいちばん細かい。",
+      "_semantics": "町丁目に重なる有効なセルの値の面積加重平均。有効なセルの被覆が min_coverage 未満なら missing。",
+      "source_year": 2011,
+      "license": "国土数値情報ダウンロードサイトコンテンツ利用規約（政府標準利用規約準拠版）。使用許諾条件：商用可。出典：国土交通省 国土数値情報（標高・傾斜度5次メッシュデータ）を加工して作成",
+      "verified": true
+    }
+  },
+  "_not_built": "今回作らないもの：漁港（C09）と漁業集落（fishery_settlement_overlap）、三大都市圏・都市雇用圏（metro_core_flag・uea_member）、住宅・土地統計調査の二次的住宅比率（vacation_home_share_muni）"
+}
