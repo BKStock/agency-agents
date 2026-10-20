@@ -125,12 +125,12 @@ def wayback_routes(bodies: dict[str, bytes]) -> dict:
 # ---------------------------------------------------------------- 地域
 
 _URBAN = dict(pop_total=2500, pop_age_known=2500, pop_65plus=600, pop_2010=2450, households_general=1000,
-              hh_in_housing=1000, establishments=30, area_km2=0.5, did_flag=1, agri_settlement_overlap=0,
+              hh_in_housing=1000, hh_main=1000, establishments=30, area_km2=0.5, did_flag=1, agri_settlement_overlap=0,
               fishery_settlement_overlap=0, farmland_ratio=0.01, forest_ratio=0.0, slope_mean_deg=1.0,
               zoning_residential_ratio=0.9, zoning_commercial_ratio=0.05, land_price_pref_pct=0.5,
               metro_core_flag=1, uea_member=1, vacation_home_share_muni=0.002, hh_rented_public=0, hh_company=0)
 _RURAL = dict(pop_total=300, pop_age_known=300, pop_65plus=90, pop_2010=330, households_general=120,
-              hh_in_housing=120, hh_detached=115, hh_apartment=5, hh_owned=110, hh_rented_private=10,
+              hh_in_housing=120, hh_main=120, hh_detached=115, hh_apartment=5, hh_owned=110, hh_rented_private=10,
               hh_rented_public=0, hh_company=0, establishments=5, area_km2=8.0, did_flag=0,
               agri_settlement_overlap=0.1, fishery_settlement_overlap=0, farmland_ratio=0.05, forest_ratio=0.3,
               slope_mean_deg=3.0, zoning_residential_ratio=0, zoning_commercial_ratio=0, land_price_pref_pct=0.1,

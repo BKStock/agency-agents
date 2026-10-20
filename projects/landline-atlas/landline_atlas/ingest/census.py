@@ -39,7 +39,7 @@ def import_towns(conn: sqlite3.Connection, path: Path, mapping: dict, census_yea
             continue
         key = town_key(rec[cols["town_key"]])
         muni = municipality_code(rec[cols["municipality_code"]]) if cols.get("municipality_code") else key[:5]
-        state, merged = secrecy(rec.get(cols.get("htksyori", ""), "0"), rec.get(cols.get("htksaki", "")))
+        state, merged = secrecy(rec.get(cols.get("htksyori", ""), "0"), rec.get(cols.get("htksaki", "")), own_key=key)
         conn.execute("INSERT INTO regions.town VALUES (?,?,?,?,?,?,?,?,?)",
                      (key, census_year, boundary_version, muni[:2], muni, nfkc(rec.get(cols.get("name", ""))) or None,
                       state, merged, source_id))

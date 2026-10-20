@@ -104,10 +104,18 @@ def stat_value(raw: object, symbols: Mapping[str, str] = STAT_SYMBOLS) -> tuple[
     return value, ("zero" if value == 0 else "observed")
 
 
-SECRECY_CODES: Mapping[str, str] = {"0": "none", "1": "merged_into_other", "2": "merge_target"}
+# e-Stat の秘匿処理（HTKSYORI）。2020 年・大阪府の実データで確認：
+# 1 の行は値を持ち GASSAN に合算元を列挙する（合算先）。2 の行は値が X で HTKSAKI に合算先を持つ。
+SECRECY_CODES: Mapping[str, str] = {"0": "none", "1": "merge_target", "2": "merged_into_other"}
 
 
-def secrecy(htksyori: object, htksaki: object, mapping: Mapping[str, str] = SECRECY_CODES):
+def merge_target_key(own_key: str, htksaki: object) -> str:
+    """HTKSAKI を町丁目コードにする。実データでは市区町村内のコード（6桁や4桁）なので、自分の市区町村コードを前に付ける。"""
+    text = _digits(htksaki, "htksaki")
+    return town_key(text if len(text) >= 7 else own_key[:5] + text)
+
+
+def secrecy(htksyori: object, htksaki: object, mapping: Mapping[str, str] = SECRECY_CODES, *, own_key: str = ""):
     key = nfkc(htksyori) or "0"
     if key not in mapping:
         raise ValueError(f"unknown HTKSYORI {htksyori!r}; check the e-Stat definition and extend the mapping")
@@ -115,7 +123,7 @@ def secrecy(htksyori: object, htksaki: object, mapping: Mapping[str, str] = SECR
     if state == "merged_into_other":
         if not nfkc(htksaki):
             raise ValueError("merged area without HTKSAKI")
-        return state, town_key(htksaki)
+        return state, merge_target_key(own_key, htksaki)
     return state, None
 
 

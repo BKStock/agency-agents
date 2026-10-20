@@ -136,9 +136,9 @@ class RulesTest(unittest.TestCase):
                 parse(data)
 
     def test_features_missing_propagates(self):
-        f = derive({"hh_detached": Feature.of(10), "hh_in_housing": Feature(None, "suppressed")})
+        f = derive({"hh_detached": Feature.of(10), "hh_main": Feature(None, "suppressed")})
         self.assertEqual(f["detached_ratio"].state, "suppressed")
-        self.assertEqual(derive({"hh_detached": Feature.of(0), "hh_in_housing": Feature.of(0)})["detached_ratio"].state,
+        self.assertEqual(derive({"hh_detached": Feature.of(0), "hh_main": Feature.of(0)})["detached_ratio"].state,
                          "undefined")
         self.assertEqual(set(CODES), set(parse(self.base()).classes))
 

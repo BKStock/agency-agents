@@ -46,6 +46,15 @@ def run(conn, raw_dir: Path, cfg: dict, pref: str, *, probe: bool, transport=Non
         records = estat_tables.parse_boundary_zip(b.body)
         report["boundary"].update(estat_tables.describe_boundary(records, cfg["boundary"]["fields"]))
 
+    # 秘匿の状態は全ての表を合わせて決める（表によって秘匿の有無が違う）
+    sec = estat_tables.secrecy_by_town([t for _, _, t in fetched_tables])
+    town_keys = set()
+    for spec, _, table in fetched_tables:
+        if spec.get("creates_towns"):
+            town_keys = {estat_tables.town_key(estat_tables.nfkc(r[table.codes.index("KEY_CODE")]))
+                         for r in estat_tables.leaf_rows(table)[0]}
+    report["secrecy"] = sec.counts(town_keys)
+
     # 停止の判定：必須の表が無い、または取れた表で見出しが特定できない列がある
     for spec in cfg["tables"]:
         entry = report["tables"][spec["stats_id"]]
@@ -55,6 +64,8 @@ def run(conn, raw_dir: Path, cfg: dict, pref: str, *, probe: bool, transport=Non
             bad = {k: v["status"] for k, v in entry["matches"].items() if v["status"] != "ok"}
             if bad and spec.get("required"):
                 report["stopped"] = f"{spec['stats_id']}: columns not identified {bad}"
+    if sec.conflicts:
+        report["stopped"] = f"tables disagree on secrecy for {len(sec.conflicts)} towns"
     if probe or report["stopped"]:
         return report
 
@@ -64,7 +75,7 @@ def run(conn, raw_dir: Path, cfg: dict, pref: str, *, probe: bool, transport=Non
                               cfg["license"], f.sha256)
         estat.store(conn, raw_dir, f, pref, table.member)
         report["tables"][spec["stats_id"]]["import"] = estat_tables.import_table(conn, table, spec, year, version,
-                                                                                source_id)
+                                                                                source_id, sec)
     if records is not None:
         source_id = f"estat:boundary:{pref}:{b.sha256[:12]}"
         estat_tables.register(conn, source_id, f"令和2年国勢調査 小地域境界（{pref}）", b.url, year,
@@ -97,7 +108,7 @@ def render(report: dict) -> str:
             for feat, m in t["matches"].items():
                 lines.append(f"  {feat}: {STATUS_JA[m['status']]}" + (f"「{m['label']}」" if m["label"] else "")
                              + (f" 候補: {', '.join(m['candidates'])}" if m["status"] == "multiple" else ""))
-            lines.append("  列（先頭60）: " + " / ".join(t["columns"]))
+            lines.append(f"  列（{t['column_count']} 列中 先頭60）: " + " / ".join(t["columns"]))
             if "import" in t:
                 im = t["import"]
                 lines.append(f"  → 取込: 町丁目 {im['towns_created']:,} 件を作成、値 {im['features_written']:,} 件"
@@ -105,6 +116,12 @@ def render(report: dict) -> str:
         else:
             for tr in t["tried"]:
                 lines.append(f"  試した: {tr['url']} → {tr['result']}")
+        lines.append("")
+    s = report.get("secrecy")
+    if s:
+        lines.append(f"■ 秘匿（全ての表を合わせて判定）：秘匿なし {s['none']:,}・合算先 {s['merge_target']:,}・"
+                     f"他へ合算 {s['merged_into_other']:,}（うち親の大字へ合算 {s['merged_into_upper_level']:,}）"
+                     + (f"・表の間で矛盾 {len(s['conflicts'])}" if s["conflicts"] else ""))
         lines.append("")
     bnd = report["boundary"]
     lines.append(f"■ 境界データ：{'取得できた' if bnd['ok'] else '取得できなかった'}")

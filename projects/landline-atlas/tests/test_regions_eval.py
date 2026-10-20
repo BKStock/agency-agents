@@ -25,7 +25,7 @@ class CensusImportTest(unittest.TestCase):
             d = Path(tmp)
             (d / "towns.csv").write_text(
                 "KEY_CODE,CITY_CODE,S_NAME,HTKSYORI,HTKSAKI\n"
-                "01101000101,011011,一丁目,0,\n01101000102,01101,二丁目,1,01101000101\n01101000103,01101,三丁目,2,\n",
+                "01101000101,011011,一丁目,0,\n01101000102,01101,二丁目,2,000103\n01101000103,01101,三丁目,1,\n",
                 encoding="cp932")
             (d / "pop.csv").write_text(
                 "KEY_CODE,T001101001,T001101034\n,総数,65歳以上\n01101000101,1,234,X\n01101000103,-,…\n"
@@ -38,7 +38,7 @@ class CensusImportTest(unittest.TestCase):
             self.assertEqual(census.import_towns(conn, d / "towns.csv", mapping, YEAR, BV, "c"), 3)
             census.import_features(conn, d / "pop.csv", mapping, YEAR, BV, "c")
             towns = {r["town_key"]: (r["secrecy"], r["merged_into"]) for r in conn.execute("SELECT * FROM regions.town")}
-            self.assertEqual(towns["01101000102"], ("merged_into_other", "01101000101"))
+            self.assertEqual(towns["01101000102"], ("merged_into_other", "01101000103"))  # HTKSAKI は市区町村内のコード
             self.assertEqual(towns["01101000103"], ("merge_target", None))
             feats = {(r["town_key"], r["feature"]): (r["value"], r["state"])
                      for r in conn.execute("SELECT * FROM regions.town_feature")}
@@ -62,7 +62,7 @@ def gold_db(tmp: Path):
             conn.execute("INSERT INTO regions.town VALUES (?,?,?,?,?,?,?,?,?)",
                          (key, YEAR, BV, muni[:2], muni, None, "none", None, "s"))
             det = (0.8 if label == "R2" else 0.2) + rng.uniform(-0.15, 0.15)
-            vals = {"hh_in_housing": 100, "hh_detached": round(100 * det), "hh_apartment": 100 - round(100 * det),
+            vals = {"hh_in_housing": 100, "hh_main": 100, "hh_detached": round(100 * det), "hh_apartment": 100 - round(100 * det),
                     "pop_total": 250, "pop_age_known": 250, "pop_65plus": 60, "area_km2": 0.2}
             put(conn, load, YEAR, BV, [(key, k, Feature.of(v, "s")) for k, v in vals.items()])
             conn.execute("INSERT INTO regions.gold_label VALUES (?,?,?,?,?,?,?,?)",

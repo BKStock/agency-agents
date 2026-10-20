@@ -33,7 +33,7 @@ MISSING = Feature(None, "missing")
 RAW = {
     "pop_total": "総人口", "pop_age_known": "年齢判明人口", "pop_65plus": "65歳以上人口",
     "pop_2010": "2010年人口（2020年境界に組替え）", "pop_2015": "2015年人口（同）",
-    "households_general": "一般世帯数", "hh_in_housing": "住宅に住む一般世帯",
+    "households_general": "一般世帯数", "hh_in_housing": "住宅に住む一般世帯", "hh_main": "主世帯数",
     "hh_detached": "一戸建", "hh_apartment": "共同住宅", "hh_owned": "持ち家",
     "hh_rented_public": "公営・UR・公社の借家", "hh_rented_private": "民営借家", "hh_company": "給与住宅",
     "area_km2": "面積", "did_flag": "DID内=1", "establishments": "事業所数",
@@ -81,8 +81,9 @@ def _change(now: str, before: str):
 
 
 DERIVED = {
-    "detached_ratio": _div(_get("hh_detached"), "hh_in_housing"),
-    "apartment_ratio": _div(_get("hh_apartment"), "hh_in_housing"),
+    # 建て方の表（T001086）は主世帯の内訳なので、分母も同じ表の主世帯数にする
+    "detached_ratio": _div(_get("hh_detached"), "hh_main"),
+    "apartment_ratio": _div(_get("hh_apartment"), "hh_main"),
     "owner_ratio": _div(_get("hh_owned"), "hh_in_housing"),
     "rental_ratio": _div(_get("hh_rented_public", "hh_rented_private", "hh_company"), "hh_in_housing"),
     "public_rental_ratio": _div(_get("hh_rented_public"), "hh_in_housing"),

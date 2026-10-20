@@ -6,6 +6,9 @@
 
 行は町丁・字等の「いちばん細かい階層」だけを使う。ある KEY_CODE を先頭に持つ、より長い
 KEY_CODE があれば、それは上位の階層（大字の合計など）なので除く（二重計上の防止）。
+
+秘匿・合算は表ごとに付く（実データでは人口総数の表に秘匿が無く、年齢・世帯・住宅の表にある）。
+町丁目の秘匿の状態は、取得した全ての表を合わせて決める（secrecy_by_town）。
 """
 
 from __future__ import annotations
@@ -14,7 +17,7 @@ import csv
 import io
 import sqlite3
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
 from ..normalize import CodeError, compact, nfkc, secrecy, stat_value, town_key
@@ -98,6 +101,47 @@ def _col(table: Table, name: str) -> int | None:
     return table.codes.index(name) if name in table.codes else None
 
 
+@dataclass
+class Secrecy:
+    states: dict[str, tuple[str, str | None]] = field(default_factory=dict)  # town_key → (状態, 合算先)
+    conflicts: list[dict] = field(default_factory=list)
+    into_upper_level: int = 0   # 親の大字（上位の階層。町丁目マスタに入らない）へ合算された町丁目
+
+    def counts(self, keys) -> dict:
+        out = {"none": 0, "merged_into_other": 0, "merge_target": 0}
+        for k in keys:
+            out[self.states.get(k, ("none", None))[0]] += 1
+        return {**out, "merged_into_upper_level": self.into_upper_level, "conflicts": self.conflicts[:20]}
+
+
+def secrecy_by_town(tables: list[Table]) -> Secrecy:
+    """全ての表の HTKSYORI/HTKSAKI を合わせて町丁目ごとの秘匿の状態を決める。
+
+    秘匿なし（0）の表は他の表の秘匿と矛盾しない（表によって秘匿の有無が違う）。
+    2つの表が違う秘匿の状態・合算先を示したら矛盾として返す（どちらかを推測で選ばない）。
+    """
+    out = Secrecy()
+    upper: set[str] = set()
+    for table in tables:
+        leaves, _ = leaf_rows(table)
+        k, hk, hs = table.codes.index("KEY_CODE"), _col(table, "HTKSYORI"), _col(table, "HTKSAKI")
+        if hk is None:
+            continue
+        all_keys = {nfkc(r[k]) for r in table.rows if k < len(r)}
+        leaf_keys = {nfkc(r[k]) for r in leaves}
+        upper |= all_keys - leaf_keys
+        for r in leaves:
+            key = town_key(nfkc(r[k]))
+            got = secrecy(r[hk] if hk < len(r) else "0", r[hs] if hs is not None and hs < len(r) else None, own_key=key)
+            if got[0] == "none":
+                continue
+            prev = out.states.setdefault(key, got)
+            if prev != got:
+                out.conflicts.append({"town_key": key, "states": [list(prev), list(got)]})
+    out.into_upper_level = sum(1 for s, m in out.states.values() if s == "merged_into_other" and m in upper)
+    return out
+
+
 def describe_table(table: Table, spec: dict) -> dict:
     leaves, skipped = leaf_rows(table)
     hk = _col(table, "HTKSYORI")
@@ -108,11 +152,39 @@ def describe_table(table: Table, spec: dict) -> dict:
             secrecy_values[v] = secrecy_values.get(v, 0) + 1
     return {"member": table.member, "rows": len(table.rows), "town_rows": len(leaves), "skipped": skipped,
             "columns": [f"{c}:{lab}" for c, lab in zip(table.codes, table.labels)][:60],
+            "column_count": len(table.codes),
             "matches": match_features(table, spec.get("features", {})), "htksyori_values": secrecy_values}
 
 
-def import_table(conn: sqlite3.Connection, table: Table, spec: dict, year: int, version: str, source_id: str) -> dict:
-    """見出しで当たった列だけを取り込む。当たらない・複数の列は取り込まず、結果に書く。"""
+def _computed(spec: dict) -> dict[str, list[str]]:
+    """computed の式（["a", "+", "b", "-", "c"]）を検査して返す。演算子は + と - だけ。"""
+    out = {}
+    for name, expr in spec.get("computed", {}).items():
+        if len(expr) % 2 == 0 or any(op not in ("+", "-") for op in expr[1::2]):
+            raise ValueError(f"computed {name}: expected [feature, '+'|'-', feature, ...], got {expr}")
+        out[name] = expr
+    return out
+
+
+def _evaluate(expr: list[str], values: dict, source_id: str) -> Feature | None:
+    terms = [values.get(n) for n in expr[0::2]]
+    if any(t is None for t in terms):
+        return None
+    bad = next((t for t in terms if not t.usable), None)
+    if bad is not None:
+        return Feature(None, bad.state, source_id)
+    total = terms[0].value
+    for op, t in zip(expr[1::2], terms[1:]):
+        total = total + t.value if op == "+" else total - t.value
+    return Feature.of(total, source_id)
+
+
+def import_table(conn: sqlite3.Connection, table: Table, spec: dict, year: int, version: str, source_id: str,
+                 secrecy_map: Secrecy | None = None) -> dict:
+    """見出しで当たった列だけを取り込む。当たらない・複数の列は取り込まず、結果に書く。
+
+    町丁目を作る表では、secrecy_map（全ての表から決めた秘匿の状態）があればそれを使う。
+    """
     matches = match_features(table, spec.get("features", {}))
     bad = {f: m for f, m in matches.items() if m["status"] != "ok"}
     leaves, skipped = leaf_rows(table)
@@ -123,7 +195,11 @@ def import_table(conn: sqlite3.Connection, table: Table, spec: dict, year: int, 
         city, name = _col(table, "CITYNAME"), _col(table, "NAME")
         for r in leaves:
             key = town_key(nfkc(r[k]))
-            state, merged = secrecy(r[hk] if hk is not None else "0", r[hs] if hs is not None else None)
+            if secrecy_map is not None:
+                state, merged = secrecy_map.states.get(key, ("none", None))
+            else:
+                state, merged = secrecy(r[hk] if hk is not None else "0", r[hs] if hs is not None else None,
+                                        own_key=key)
             label = "".join(nfkc(r[i]) for i in (city, name) if i is not None and i < len(r)) or None
             cur = conn.execute("INSERT OR IGNORE INTO regions.town VALUES (?,?,?,?,?,?,?,?,?)",
                                (key, year, version, key[:2], key[:5], label, state, merged, source_id))
@@ -131,8 +207,9 @@ def import_table(conn: sqlite3.Connection, table: Table, spec: dict, year: int, 
     known = {r[0] for r in conn.execute("SELECT town_key FROM regions.town WHERE census_year = ? AND boundary_version = ?",
                                         (year, version))}
     load_id = new_load(conn, "census", source_id)
-    # 計算に使うだけの列（例：年齢総数・年齢不詳）は保存せず、計算結果（年齢判明人口）だけを保存する
-    inputs = {name for a, _, b in spec.get("computed", {}).values() for name in (a, b)}
+    # 計算に使うだけの列（"store": false。例：15歳未満）は保存せず、計算結果（年齢判明人口）だけを保存する
+    computed = _computed(spec)
+    inputs = {name for name, fs in spec.get("features", {}).items() if fs.get("store") is False}
     rows, unknown = [], 0
     for r in leaves:
         key = town_key(nfkc(r[k]))
@@ -143,15 +220,10 @@ def import_table(conn: sqlite3.Connection, table: Table, spec: dict, year: int, 
         for feature, m in matches.items():
             if m["status"] == "ok":
                 values[feature] = Feature(*stat_value(r[m["index"]] if m["index"] < len(r) else None), source_id)
-        for feature, (a, op, b) in spec.get("computed", {}).items():
-            fa, fb = values.get(a), values.get(b)
-            if op != "-" or fa is None or fb is None:
-                continue
-            if fa.usable and fb.usable:
-                values[feature] = Feature.of(fa.value - fb.value, source_id)
-            else:
-                worst = fa if not fa.usable else fb
-                values[feature] = Feature(None, worst.state, source_id)
+        for feature, expr in computed.items():
+            got = _evaluate(expr, values, source_id)
+            if got is not None:
+                values[feature] = got
         rows += [(key, f, v) for f, v in values.items() if f not in inputs]
     n = put(conn, load_id, year, version, rows)
     return {"towns_created": created, "features_written": n, "load_id": load_id, "skipped": skipped,
