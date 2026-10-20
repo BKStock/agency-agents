@@ -12,7 +12,7 @@
 
 > **状態**
 > - 作成環境では、soumu.go.jp・e-stat.go.jp・web.archive.org への接続がネットワーク方針で拒否されました。そのため、**実データでの取得・解析はまだ一度も行っていません**。
-> - テスト（57件）はすべて、合成データと模擬 HTTP 応答によるものです。総務省の表の実際の見出し・ファイル名規則・使用中の表記は未確認です。初回実行時に `config/layouts.json`・`config/sources.json` を実ファイルに合わせて確認してください（[docs/operations.md](docs/operations.md)）。
+> - テスト（63件）はすべて、合成データと模擬 HTTP 応答によるものです。総務省の表の実際の見出し・ファイル名規則・使用中の表記は未確認です。初回実行時に `config/layouts.json`・`config/sources.json` を実ファイルに合わせて確認してください（[docs/operations.md](docs/operations.md)）。
 > - 12分類のルールは全分類が未承認のため、**確定は出力されません**。
 
 ## 何をするか
@@ -39,6 +39,8 @@ python -m unittest discover -s tests
 atlas init                                   # 既定のデータ置き場は ~/landline_atlas_data
 atlas update --wayback                       # 取得 → … → 出力 → バックアップ
 atlas update --offline --import ~/Downloads/06.xls      # 手元の原本を取り込む（元ファイルは変更しない）
+atlas fetch-census --pref 27 --probe                    # e-Stat の国勢調査を確認だけ（DBに書かない）
+atlas fetch-census --pref 27                            # 取得して町丁目マスタ・特徴量に取り込む
 atlas import-census --mapping config/estat_mapping.example.json \
   --towns towns.csv --features pop.csv --source-id census2020 \
   --census-year 2020 --boundary-version estat-2020

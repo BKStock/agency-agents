@@ -25,7 +25,18 @@ def layout() -> dict:
     return json.loads((CONFIG / "layouts.json").read_text(encoding="utf-8"))
 
 
+_XLSX_CACHE: dict[str, bytes] = {}
+
+
 def xlsx(date_text: str, rows: list[list], *, title: str = "固定電話番号の指定状況") -> bytes:
+    """同じ内容なら同じバイト列を返す（openpyxl は保存時刻を書き込むため、作り直すと別の原本になる）。"""
+    key = repr((date_text, rows, title))
+    if key not in _XLSX_CACHE:
+        _XLSX_CACHE[key] = _build_xlsx(date_text, rows, title)
+    return _XLSX_CACHE[key]
+
+
+def _build_xlsx(date_text: str, rows: list[list], title: str) -> bytes:
     from openpyxl import Workbook
     wb = Workbook()
     ws = wb.active

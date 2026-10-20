@@ -1,0 +1,61 @@
+{
+  "_note": "e-Stat 統計地理情報システムからの国勢調査（小地域）の自動取得。URL の形と表 ID は解説記事・e-Stat の項目定義書（help/data-definition-information/shuroku/T00xxxx.pdf）による。実物では未確認なので、まず atlas fetch-census --probe で確かめる。列は列コードではなく2行目の日本語の見出しで探す。",
+  "census_year": 2020,
+  "boundary_version": "estat-2020",
+  "license": "政府標準利用規約（第2.0版）。出典：総務省統計局「令和2年国勢調査」（e-Stat）",
+  "boundary": {
+    "name": "小地域（町丁・字等）境界データ（Shapefile・世界測地系緯度経度）",
+    "url_templates": [
+      "https://www.e-stat.go.jp/gis/statmap-search/data?dlserveyId=A002005212020&code={pref}&coordSys=1&format=shape&downloadType=5&datum=2011",
+      "https://www.e-stat.go.jp/gis/statmap-search/data?dlserveyId=A002005212020&code={pref}&coordSys=1&format=shape&downloadType=5&datum=2000"
+    ],
+    "fields": {"key": ["KEY_CODE"], "area_m2": ["AREA"], "population": ["JINKO"], "households": ["SETAI"]}
+  },
+  "listing_templates": [
+    "https://www.e-stat.go.jp/gis/statmap-search?page=1&type=1&toukeiCode=00200521&toukeiYear=2020&aggregateUnit=A&serveyId=A002005212020&statsId={stats_id}&prefCode={pref}",
+    "https://www.e-stat.go.jp/gis/statmap-search?page=1&type=1&toukeiCode=00200521&toukeiYear=2020&aggregateUnit=A&serveyId=A002005212020&statsId={stats_id}"
+  ],
+  "download_templates": [
+    "https://www.e-stat.go.jp/gis/statmap-search/data?statsId={stats_id}&code={pref}&downloadType=2"
+  ],
+  "tables": [
+    {
+      "stats_id": "T001081",
+      "name": "男女別人口総数及び世帯総数",
+      "required": true,
+      "creates_towns": true,
+      "features": {
+        "pop_total": {"include": ["人口総数"], "exclude": ["男", "女"]}
+      },
+      "check_against_boundary": {"pop_total": "population"},
+      "verified": false
+    },
+    {
+      "stats_id": "T001082",
+      "name": "年齢（5歳階級、4区分）別、男女別人口",
+      "required": false,
+      "features": {
+        "pop_age_total": {"include": ["総数"], "exclude": ["男", "女", "歳"]},
+        "pop_age_unknown": {"include": ["不詳"], "exclude": ["男", "女", "総数"]},
+        "pop_65plus": {"include": ["65歳以上"], "exclude": ["男", "女", "75歳"]}
+      },
+      "computed": {"pop_age_known": ["pop_age_total", "-", "pop_age_unknown"]},
+      "verified": false
+    },
+    {
+      "stats_id": "T001085",
+      "name": "住宅の所有の関係別一般世帯数",
+      "required": false,
+      "features": {
+        "households_general": {"include": ["一般世帯数"], "exclude": ["住宅", "主世帯"]},
+        "hh_in_housing": {"include": ["住宅に住む一般世帯"], "exclude": ["以外"]},
+        "hh_owned": {"include": ["持ち家"], "exclude": []},
+        "hh_rented_public": {"include": ["公営"], "exclude": []},
+        "hh_rented_private": {"include": ["民営"], "exclude": []},
+        "hh_company": {"include": ["給与住宅"], "exclude": []}
+      },
+      "verified": false
+    }
+  ],
+  "_not_yet": "住宅の建て方別（一戸建・共同住宅）の 2020 年町丁・字等の表 ID は未確認。見つかったら tables に追加する（features: hh_detached=一戸建、hh_apartment=共同住宅）。"
+}
