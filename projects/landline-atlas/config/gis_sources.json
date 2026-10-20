@@ -1,5 +1,5 @@
 {
-  "_note": "atlas fetch-gis の取得先と属性。URL・ファイル名・属性名・コードは 2026-10-20 に各データの配布ページ・定義書・高知県（39）の実ファイルで確認した（verified: true）。属性やコードがここに書いたものと違えば、取り込まずに停止する。",
+  "_note": "atlas fetch-gis の取得先と属性。URL・ファイル名・属性名・コードは 2026-10-20 に各データの配布ページ・定義書・高知県（39）の実ファイルで確認した（verified: true）。属性やコードがここに書いたものと違えば、取り込まずに停止する。 2026-10-20 に rural_settlement・fishery_settlement・metro・vacation_home・establishments を追加し、大阪府（27）・岩手県（03）・長野県（20）・高知県（39）の実ファイルで確認した。",
   "census_year": 2020,
   "boundary_version": "estat-2020",
   "towns": {
@@ -199,7 +199,8 @@
       "_semantics": "町丁目の面積のうち、農業集落として認定された区域に入る割合。認定されていない区域（999・-99）は 0 として数え、意味の決まらない図形の部分は値が分からない部分にする。",
       "source_year": 2020,
       "license": "「地域の農業を見て・知って・活かすDB」は、どなたでも複製、公衆送信、翻訳・変換等の翻案等、自由に利用できる。利用時は出典を明示し、編集・加工した場合は編集・加工者も明示する（農林水産省「地域の農業を見て・知って・活かすDB」利用上の注意）。出典：農林水産省「2020年農林業センサス 農業集落境界データ」を加工して作成",
-      "verified": true
+      "verified": true,
+      "key_field": "KEY"
     },
     "elevation": {
       "name": "国土数値情報 標高・傾斜度5次メッシュ（平成23年度）G04-d-11",
@@ -231,7 +232,180 @@
       "source_year": 2011,
       "license": "国土数値情報ダウンロードサイトコンテンツ利用規約（政府標準利用規約準拠版）。使用許諾条件：商用可。出典：国土交通省 国土数値情報（標高・傾斜度5次メッシュデータ）を加工して作成",
       "verified": true
+    },
+    "rural_settlement": {
+      "name": "農林水産省 農業地域類型（令和5年改訂・2020年農業集落基準）と 2020年農業集落境界",
+      "page": "https://www.maff.go.jp/j/tokei/census/shuraku_data/2020/ia/index.html",
+      "terms_page": "https://www.maff.go.jp/j/tokei/census/shuraku_data/index.html",
+      "format_page": "https://www.maff.go.jp/j/tokei/census/shuraku_data/2020/ia/attach/xls/index-3.xlsx",
+      "unit": "pref",
+      "boundary_from": "agri_settlement",
+      "url_template": "https://www.machimura.maff.go.jp/shurakudata/2020/ia/IA0001_2023_2020_{pref}.xlsx",
+      "types_header": [
+        "key",
+        "pref",
+        "city",
+        "kcity",
+        "rcom",
+        "pref_name",
+        "city_name",
+        "kcity_name",
+        "rcom_name",
+        "地域類型1次分類",
+        "地域類型2次分類"
+      ],
+      "types_key": "key",
+      "types_rcom": "rcom",
+      "types_field": "地域類型1次分類",
+      "type_codes": {
+        "urban": [
+          "1"
+        ],
+        "rural": [
+          "2",
+          "3",
+          "4"
+        ]
+      },
+      "type_not_applicable": [
+        "…"
+      ],
+      "features": {
+        "rural_settlement_overlap": {}
+      },
+      "_codes": "データフォーマット（index-3.xlsx の IA0001）：地域類型1次分類 1＝都市的地域、2＝平地農業地域、3＝中間農業地域、4＝山間農業地域。値は農業集落の行（rcom が 000 以外）に入る。「…」は 4 府県では認定されていない区域（RCOM 999・-99）の行だけに現れた。認定された農業集落に類型が無ければ停止する。",
+      "_semantics": "町丁目の面積のうち、都市的地域でない（平地・中間・山間）農業集落に入る割合。分母の「値が分かる部分」は、類型の分かる農業集落＋認定されていない区域。農業集落境界の読み方（999・-99、HININTEI）は agri_settlement と同じ。",
+      "source_year": 2023,
+      "license": "「地域の農業を見て・知って・活かすDB」は、どなたでも複製、公衆送信、翻訳・変換等の翻案等、自由に利用できる。利用時は出典を明示し、編集・加工した場合は編集・加工者も明示する（農林水産省「地域の農業を見て・知って・活かすDB」利用上の注意）。出典：農林水産省「農業地域類型（令和5年改訂）」「2020年農林業センサス 農業集落境界データ」（地域の農業を見て・知って・活かすDB）を加工して作成",
+      "verified": true
+    },
+    "fishery_settlement": {
+      "name": "農林水産省 2023年漁業センサス 漁業集落境界データ（地域の漁業を見て・知って・活かすDB）",
+      "page": "https://www.maff.go.jp/j/tokei/census/fc/database/mapdata/index.html",
+      "terms_page": "https://www.maff.go.jp/j/tokei/census/fc/database/index.html",
+      "definitions_page": "https://www.maff.go.jp/j/tokei/census/fc/2023fc/gaiyou.html",
+      "unit": "pref",
+      "pref_regex": "MB0001_2023_(\\d{2})\\.zip",
+      "min_listed_prefectures": 30,
+      "url_template": "https://www.maff.go.jp/j/tokei/census/fc/database/mapdata/MB0001_2023_{pref}.zip",
+      "member": "MB0001_2023_{pref}/shuraku.shp",
+      "key_field": "KEY",
+      "encoding": "cp932",
+      "expect_crs": "EPSG:6668",
+      "fields": [
+        "KEY",
+        "PREF",
+        "CITY",
+        "GAREA",
+        "GCOM",
+        "CITY_NAME",
+        "GCOM_NAME"
+      ],
+      "settlement_field": "GCOM",
+      "settlement_name_field": "GCOM_NAME",
+      "other_code": "999",
+      "other_name": "その他地域",
+      "city_field": "CITY",
+      "city_name_field": "CITY_NAME",
+      "outside_tolerance": 0.005,
+      "repair_area_tolerance": 1e-06,
+      "_repair": "自己交差などの不正な図形は make_valid で直す（面の部分だけ残す）。面積が相対 repair_area_tolerance を超えて変われば停止する。2026-10-20 時点で 03・27・39 に各1件（点での自己交差、面積の変化は相対 1e-11 未満）",
+      "features": {
+        "fishery_settlement_overlap": {}
+      },
+      "_codes": "GCOM＝漁業集落番号。999 は GCOM_NAME が全て「その他地域」（漁業地区の中で漁業集落でない区域）。境界は沿海市区町村（漁業地区が設定される市区町村）だけを覆う。政令指定都市は市の単位（例 27100 大阪市）なので、区の町丁目は名前で市に当てる（用途地域と同じ）。",
+      "_semantics": "沿海市区町村の町丁目：面積のうち漁業集落に入る割合（値が分かる部分＝漁業集落＋その他地域、min_coverage 未満は missing）。沿海市区町村でない町丁目：漁業集落は漁業地区の一部で、漁業地区は沿海市区町村に設定される（2023年漁業センサスの定義）ので 0。ただし漁業集落の図形が町丁目の面積の outside_tolerance 以上に重なれば missing。都道府県の境界ファイルが配布ページに無い（長野県など海に面しない県）ときは全町丁目 0 とし、配布ページを出典として保管する。",
+      "_preferred_over": "指示のとおり、漁業集落の公的な境界があるので、漁港（国土数値情報 C09）の 1km バッファ（fishing_port_buffer_ratio）は作らず、L2 は fishery_settlement_overlap のままにする。",
+      "source_year": 2023,
+      "license": "「地域の漁業を見て・知って・活かすDB」は、どなたでも複製、公衆送信、翻訳・変換等の翻案等、自由に利用できる。利用時は出典を明示し、編集・加工した場合は編集・加工者も明示する（農林水産省「地域の漁業を見て・知って・活かすDB」利用上の注意）。出典：農林水産省「2023年漁業センサス 漁業集落境界データ」を加工して作成",
+      "verified": true
+    },
+    "metro": {
+      "name": "総務省統計局 令和2年国勢調査 大都市圏・都市圏 対象市区町村データ",
+      "page": "https://www.stat.go.jp/data/kokusei/2020/kekka/sankou.html",
+      "terms_page": "https://www.stat.go.jp/info/riyou.html",
+      "unit": "nation",
+      "url_template": "https://www.stat.go.jp/data/kokusei/2020/kekka/xlsx/ma_areaflg.xlsx",
+      "header_row": 1,
+      "code_column": "市区町村コード",
+      "flag_column": "大都市圏フラグ",
+      "flag_values": [
+        "中心市",
+        "周辺市町村"
+      ],
+      "areas": [
+        "関東大都市圏",
+        "中京大都市圏",
+        "近畿大都市圏"
+      ],
+      "features": {
+        "metro_core_flag": {}
+      },
+      "_semantics": "市区町村（政令指定都市は区）が関東・中京・近畿大都市圏の中心市または周辺市町村なら 1、それ以外は 0。表に無い市区町村は missing。",
+      "source_year": 2020,
+      "license": "総務省統計局ホームページの利用ルール（公共データ利用規約（第1.0版）準拠、CC BY 4.0 互換）。出典：総務省統計局「令和2年国勢調査 大都市圏・都市圏 対象市区町村データ」を加工して作成",
+      "verified": true
+    },
+    "vacation_home": {
+      "name": "総務省統計局 令和5年住宅・土地統計調査 住宅及び世帯に関する基本集計 第1-2表（全国、都道府県、市区町村）",
+      "page": "https://www.e-stat.go.jp/stat-search/files?page=1&layout=datalist&toukei=00200522&tstat=000001207800&stat_infid=000040209842",
+      "notes_page": "https://www.stat.go.jp/data/jyutaku/2023/pdf/riyou.pdf",
+      "unit": "nation",
+      "url_template": "https://www.e-stat.go.jp/stat-search/file-download?statInfId=000040209842&fileKind=0",
+      "title_must_contain": [
+        "令和５年住宅・土地統計調査",
+        "第１－２表",
+        "市区町村"
+      ],
+      "total_label": "0_総数",
+      "part_label": "224_二次的住宅",
+      "area_column": 1,
+      "unknown_symbol": "-",
+      "features": {
+        "vacation_home_share_muni": {}
+      },
+      "_codes": "統計表利用上の注意：「-」は該当数値がないもの又は数字が得られないもの、「0」は表章単位に満たないもの。「-」は 0 と区別できないので missing にする。市区町村の結果は市・区と人口1万5千人以上の町村だけ（表に無い市区町村は missing）。標本調査で、市区町村は 10 位までの有効数字。",
+      "_semantics": "その市区町村（政令指定都市は区）の住宅総数に占める二次的住宅（別荘・その他）の割合を、町丁目の値として付ける。",
+      "source_year": 2023,
+      "license": "e-Stat 利用規約（政府標準利用規約（第2.0版）準拠、CC BY 4.0 互換）。出典：総務省統計局「令和5年住宅・土地統計調査」（e-Stat）を加工して作成",
+      "verified": true
+    },
+    "establishments": {
+      "name": "総務省・経済産業省 令和3年経済センサス‐活動調査 小地域（町丁・大字）経営組織別全事業所数（T001168）と町丁・大字境界",
+      "page": "https://www.e-stat.go.jp/gis/statmap-search?page=1&type=1&toukeiCode=00200553&toukeiYear=2021&aggregateUnit=A&serveyId=A002005532021&statsId=T001168",
+      "definitions_page": "https://www.e-stat.go.jp/gis/statmap-search/data?datatype=2&serveyId=A002005532021&downloadType=1&datum=2011",
+      "unit": "pref",
+      "table_url_template": "https://www.e-stat.go.jp/gis/statmap-search/data?statsId=T001168&code={pref}&downloadType=2",
+      "table_member": "tblT001168C{pref}.txt",
+      "encoding": "cp932",
+      "key_column": "KEY_CODE",
+      "value_column": "T001168001",
+      "value_label": "0_総数",
+      "zero_symbol": "-",
+      "boundary_url_template": "https://www.e-stat.go.jp/gis/statmap-search/data?dlserveyId=A002005532021&code={pref}&coordSys=1&format=shape&downloadType=5&datum=2011",
+      "boundary_member": "r3ca{pref}.shp",
+      "boundary": {
+        "encoding": "cp932",
+        "expect_crs": "EPSG:6668",
+        "fields": [
+          "KEY_CODE",
+          "S_AREA",
+          "KIGO_E",
+          "JIGYOSHO"
+        ],
+        "key_field": "KEY_CODE",
+        "check_field": "JIGYOSHO"
+      },
+      "min_match_share": 0.95,
+      "features": {
+        "establishments": {}
+      },
+      "_codes": "表の列 T001168001〜008 が事業所数（総数・民営…・国、地方公共団体）、009〜016 が従業者数で、見出しはどちらも「0_総数」から始まる。どちらが事業所数かは、境界データの JIGYOSHO（定義書：事業所数。飛び地は E1 に代表して入り En は 0）と全ての町丁・大字で一致することで確かめる（一致しなければ停止）。「-」は JIGYOSHO が 0 なので 0。町丁・大字コードが 999999999999 の「その他」は所在の町丁・大字が分からない事業所で、図形が無いので町丁目には移さない（件数を表示する）。",
+      "_semantics": "経済センサスの町丁・大字は国勢調査 2020 の町丁目とコード体系も境界も別に引かれている。重なりが町丁目の面積と町丁・大字の面積の両方の min_match_share 以上のときだけ同じ区域とみなして事業所数を移す。対応しない町丁目には値を書かない（missing のまま）。",
+      "source_year": 2021,
+      "license": "e-Stat 利用規約（政府標準利用規約（第2.0版）準拠、CC BY 4.0 互換）。出典：総務省・経済産業省「令和3年経済センサス‐活動調査」（e-Stat）を加工して作成",
+      "verified": true
     }
   },
-  "_not_built": "今回作らないもの：漁港（C09）と漁業集落（fishery_settlement_overlap）、三大都市圏・都市雇用圏（metro_core_flag・uea_member）、住宅・土地統計調査の二次的住宅比率（vacation_home_share_muni）"
+  "_not_built": "今回作らないもの：都市雇用圏（uea_member）。東京大学 CSIS の配布ページ・README・設定マニュアルに利用条件の記載が無く（ページの表示は「Copyright© Yoshitsugu Kanemoto All Rights Reserved.」のみ）、利用条件が不明なため停止した。漁港（C09）の 1km バッファ（fishing_port_buffer_ratio）は、公的な漁業集落境界があるので作らない。"
 }

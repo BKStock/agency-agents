@@ -101,8 +101,9 @@ atlas classify --census-year 2020 --boundary-version estat-2020
 ## GIS 特徴量を取得する
 
 ```bash
-atlas fetch-gis --pref 27 --probe   # 取得・属性の確認・計算まで（DB にもディスクにも書かない）
-atlas fetch-gis --pref 27           # 原本を raw/gis に保管し、特徴量を取り込む
+atlas fetch-gis --pref 27 --probe   # 取得・属性の確認・計算まで（DB には書かない。原本は raw/gis に残す）
+atlas fetch-gis --pref 27           # 特徴量を取り込む（--probe で残した原本を再利用する）
+atlas fetch-gis --pref 27 --refresh # 保管済みの原本を使わずに取り直す
 atlas fetch-gis --pref 27 --datasets did,zoning   # 一部のデータだけ（取り直しなど）
 atlas classify --census-year 2020 --boundary-version estat-2020
 ```
@@ -110,10 +111,14 @@ atlas classify --census-year 2020 --boundary-version estat-2020
 - 先に `atlas fetch-census` で同じ都道府県の小地域境界を取り込んでおきます。町丁目の形はその原本（raw/census）から読みます。
 - 取得先・属性・コードは `config/gis_sources.json` にあります。属性名・コード・座標系・年が書いてあるものと違えば、どのデータも取り込まずに停止します。新しい年版に替えるときは、定義書でコードを確かめてから config を直してください。
 - 原本はデータセットごとに SHA-256 で保管し（`regions.raw_gis`）、出典と利用条件を `source_document` に記録します。メッシュ単位のデータは、その都道府県で使ったファイルを束ねた出典を1つ作り、特徴量はそれを指します。
+- 同じ URL は二度ダウンロードしません。`--probe` で取得した原本は `raw/gis/<sha>` と索引 `raw/gis/probe_index.json` に残し、取込や次の `--probe` では SHA-256 が合うときだけ再利用します（合わなければ取り直し、保管済みのファイルとも合わなければ上書きせずに停止）。配布元が更新されたときは `--refresh` で取り直します。
 - 取り込みは毎回新しい load として追記します。前の値は消えず、分類は町丁目・特徴量ごとに最新の load を使います。
 - missing になるのは次の町丁目です。
   - 用途地域：その市区町村の用途地域ファイルが配布されていない（公開不可・資料の提供なし・用途地域なしを区別できない）
   - 地価：町丁目の中に地価公示の地点が無い
+  - 二次的住宅比率：市区町村が住宅・土地統計調査の表に無い（人口1万5千人未満の町村）か「-」
+  - 事業所数：missing ではなく値を書かない。経済センサスの町丁・大字と国勢調査の町丁目が1対1で重ならない町丁目（`towns_not_matched`）
+  - 漁業集落：沿海市区町村の中で、集落・その他地域のどちらの図形も無い部分
   - そのほか：町丁目の面積のうち値が分かっている部分が `min_coverage` 未満（水面の調査区、海岸線の描き方の違い、農業集落の区分が定義書から決まらない部分など）
 - 用途地域は市区町村ごとに利用条件が違います（`Situation_of_the_data_collection_RestrictedZoneData.pdf`）。出力を外に出す前に確認してください。
 

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import math
 import os
@@ -125,11 +126,73 @@ def mesh1_codes(towns) -> set[str]:
 # ---------------------------------------------------------------------------
 # 取得
 
+class RawCache:
+    """保管済みの原本を URL で探して再利用する（--refresh のときは使わない）。
+
+    取込で保管した原本は regions.raw_gis に、--probe で取得した原本は raw/gis/probe_index.json に載る。
+    --probe は DB に書かないので、原本のファイルと索引だけをディスクに残し、続く取込で同じ URL を取り直さない。
+    ファイルの SHA-256 が記録と合わなければ使わずに取り直す。"""
+
+    def __init__(self, conn, raw_dir: Path, *, refresh: bool, probe: bool):
+        self.conn, self.raw_dir, self.refresh, self.probe = conn, raw_dir, refresh, probe
+        self.index_path = raw_dir / "gis" / "probe_index.json"
+        self.fetched_at: dict[str, str] = {}
+        self.reused: list[str] = []
+        self.memo: dict[str, estat.Fetched] = {}   # 同じ実行の中で2つのデータセットが同じ URL を使うとき
+
+    def _index(self) -> dict:
+        try:
+            return json.loads(self.index_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def _candidates(self, url: str) -> list[tuple[str, str, str]]:
+        rows = self.conn.execute("SELECT sha256, stored_path, fetched_at FROM regions.raw_gis WHERE url = ?"
+                                 " ORDER BY fetched_at DESC", (url,)).fetchall()
+        out = [(r[0], r[1], r[2]) for r in rows]
+        e = self._index().get(url)
+        if e:
+            out.append((e["sha256"], e["stored_path"], e["fetched_at"]))
+        return out
+
+    def lookup(self, url: str, item: str) -> estat.Fetched | None:
+        if url in self.memo:
+            return self.memo[url]
+        if self.refresh:
+            return None
+        for sha, stored, at in self._candidates(url):
+            path = self.raw_dir / stored
+            if not path.exists():
+                continue
+            body = path.read_bytes()
+            if hashlib.sha256(body).hexdigest() != sha:
+                continue
+            self.fetched_at[url] = at
+            self.reused.append(url)
+            self.memo[url] = estat.Fetched(item, True, url, sha, body, [{"url": url, "result": f"reused {stored}"}])
+            return self.memo[url]
+        return None
+
+    def remember(self, fetched: estat.Fetched) -> None:
+        """取得した時刻を覚える。--probe では原本を保管して索引に載せる（DB には書かない）。"""
+        self.fetched_at[fetched.url] = utc_now()
+        self.memo[fetched.url] = fetched
+        if not self.probe:
+            return
+        stored = _write_raw(self.raw_dir, fetched.sha256, fetched.body)
+        index = self._index()
+        index[fetched.url] = {"sha256": fetched.sha256, "stored_path": stored, "fetched_at": self.fetched_at[fetched.url]}
+        fd, tmp = tempfile.mkstemp(dir=self.index_path.parent)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(index, fh, ensure_ascii=False, indent=1, sort_keys=True)
+        os.replace(tmp, self.index_path)
+
+
 class Ctx:
     """1回の実行で共有するもの。files はデータセットごとの取得結果 (unit, Fetched, 一時ファイル)。"""
 
-    def __init__(self, fetcher: Fetcher, towns, cfg: dict, pref: str, tmp: Path):
-        self.fetcher, self.towns, self.cfg, self.pref, self.tmp = fetcher, towns, cfg, pref, tmp
+    def __init__(self, fetcher: Fetcher, towns, cfg: dict, pref: str, tmp: Path, cache: RawCache):
+        self.fetcher, self.towns, self.cfg, self.pref, self.tmp, self.cache = fetcher, towns, cfg, pref, tmp, cache
         self.areas = gis.town_areas(towns)
         self.municipality_names: dict[str, str] = {}
         self.files: dict[str, list[tuple[str, estat.Fetched, Path]]] = {}
@@ -139,25 +202,33 @@ class Ctx:
 
 
 def _fetch_zip(ctx: Ctx, url: str, item: str) -> estat.Fetched:
+    hit = ctx.cache.lookup(url, item)
+    if hit:
+        return hit
     out = estat.Fetched(item, False)
     body = estat._try(ctx.fetcher, url, out.tried)
     if body:
         out.ok, out.url, out.body, out.sha256 = True, url, body, hashlib.sha256(body).hexdigest()
+        ctx.cache.remember(out)
     return out
 
 
 def _keep(ctx: Ctx, key: str, unit: str, f: estat.Fetched) -> Path:
-    path = ctx.tmp / f"{key}_{unit}.zip"
+    path = ctx.tmp / f"{key}_{unit}{_ext(f.body)}"
     path.write_bytes(f.body)
     ctx.files.setdefault(key, []).append((unit, f, path))
     return path
 
 
-def fetch_pref(ctx: Ctx, key: str, spec: dict) -> Path:
-    f = _fetch_zip(ctx, spec["url_template"].format(pref=ctx.pref), key)
+def fetch_url(ctx: Ctx, key: str, unit: str, url: str) -> Path:
+    f = _fetch_zip(ctx, url, f"{key}:{unit}")
     if not f.ok:
         raise Stop(f"{key}: download failed {f.tried}")
-    return _keep(ctx, key, ctx.pref, f)
+    return _keep(ctx, key, unit, f)
+
+
+def fetch_pref(ctx: Ctx, key: str, spec: dict) -> Path:
+    return fetch_url(ctx, key, ctx.pref, spec["url_template"].format(pref=ctx.pref))
 
 
 def fetch_meshes(ctx: Ctx, key: str, spec: dict, entry: dict) -> list[tuple[str, Path]]:
@@ -171,13 +242,8 @@ def fetch_meshes(ctx: Ctx, key: str, spec: dict, entry: dict) -> list[tuple[str,
     needed = mesh1_codes(ctx.towns)
     entry["meshes"] = {"needed": len(needed), "listed_and_needed": sorted(needed & listed),
                        "not_listed": sorted(needed - listed)}
-    out = []
-    for mesh in sorted(needed & listed):
-        f = _fetch_zip(ctx, spec["url_template"].format(mesh=mesh), f"{key}:{mesh}")
-        if not f.ok:
-            raise Stop(f"{key}: mesh {mesh} download failed {f.tried}")
-        out.append((mesh, _keep(ctx, key, mesh, f)))
-    return out
+    return [(mesh, fetch_url(ctx, key, mesh, spec["url_template"].format(mesh=mesh)))
+            for mesh in sorted(needed & listed)]
 
 
 # ---------------------------------------------------------------------------
@@ -334,14 +400,16 @@ def land_price(ctx: Ctx, spec: dict, entry: dict):
                                     for k in ctx.areas}}
 
 
-def agri_settlement(ctx: Ctx, spec: dict, entry: dict):
-    path = fetch_pref(ctx, "agri_settlement", spec)
-    gdf = read_checked(path, spec["member"].format(pref=ctx.pref), spec, "agri_settlement")
-    check_codes(gdf, spec["flag_field"], set(spec["flag_values"]), "agri_settlement")
+def agri_polygons(ctx: Ctx, spec: dict, entry: dict, key: str):
+    """農業集落境界を読み、図形を recognized / not_recognized / uncertain に分ける（列 grp）。"""
+    path = fetch_url(ctx, key, "boundary" if key != "agri_settlement" else ctx.pref,
+                     spec["url_template"].format(pref=ctx.pref))
+    gdf = read_checked(path, spec["member"].format(pref=ctx.pref), spec, key)
+    check_codes(gdf, spec["flag_field"], set(spec["flag_values"]), key)
     rcom, flag = gdf[spec["settlement_field"]].astype(str), gdf[spec["flag_field"]].astype(str)
     notrec = rcom.isin(spec["not_recognized_codes"])
     if (notrec & (flag == "0")).any():
-        raise Stop(f"agri_settlement: {int((notrec & (flag == '0')).sum())} polygons have RCOM 999/-99 "
+        raise Stop(f"{key}: {int((notrec & (flag == '0')).sum())} polygons have RCOM 999/-99 "
                    f"but {spec['flag_field']}=0")
     grp = notrec.map({True: "not_recognized", False: "recognized"}).where(~(~notrec & (flag != "0")), "uncertain")
     gdf = gdf.assign(grp=grp)
@@ -350,14 +418,252 @@ def agri_settlement(ctx: Ctx, spec: dict, entry: dict):
     entry["uncertain"] = {"rcom": dict(Counter(unc[spec["settlement_field"]].astype(str))),
                           "names": sorted({str(n) for n in unc.get("RCOM_NAME", []) if n == n})[:10],
                           "area_km2": round(sum(gis.geodesic_areas(unc.to_crs(gis.CRS).geometry)) / 1e6, 3)}
-    layer = gdf.to_crs(gis.CRS).dissolve(by="grp", as_index=False)
-    areas = gis.class_areas(ctx.towns, layer, "grp")
+    return gdf
+
+
+def agri_settlement(ctx: Ctx, spec: dict, entry: dict):
+    gdf = agri_polygons(ctx, spec, entry, "agri_settlement")
+    areas = gis.class_areas(ctx.towns, gdf.to_crs(gis.CRS).dissolve(by="grp", as_index=False), "grp")
     out = {}
     for key, total in ctx.areas.items():
         a = areas.get(key, {})
         out[key] = gis.share(total, a.get("recognized", 0.0), a.get("recognized", 0.0) + a.get("not_recognized", 0.0),
                              ctx.min_coverage(spec))
     return {"agri_settlement_overlap": out}
+
+
+def _xlsx_rows(path: Path) -> list[tuple]:
+    import openpyxl
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        return [tuple(r) for r in wb.worksheets[0].iter_rows(values_only=True)]
+    finally:
+        wb.close()
+
+
+def repair_polygons(gdf, key_field: str, tolerance: float, entry: dict, key: str):
+    """不正な図形（自己交差など）を make_valid で直し、面の部分だけ残す。直した図形のキーを entry に記録する。
+
+    dissolve が位相の矛盾で落ちるのを防ぐためで、面積が相対 tolerance を超えて変わるなら直さずに停止する。"""
+    import shapely
+    bad = ~gdf.geometry.is_valid
+    if not bad.any():
+        return gdf
+    fixed, repaired = gdf.geometry.copy(), []
+    for i in gdf.index[bad]:
+        g = gdf.geometry[i]
+        parts = [p for p in shapely.get_parts(shapely.make_valid(g)) if p.geom_type in ("Polygon", "MultiPolygon")]
+        new = shapely.union_all(parts) if parts else None
+        change = abs(new.area - g.area) / g.area if new is not None and g.area > 0 else math.inf
+        if change > tolerance:
+            raise Stop(f"{key}: repairing {gdf[key_field][i]} changes its area by {change:.2e} (> {tolerance})")
+        fixed[i] = new
+        repaired.append(str(gdf[key_field][i]))
+    entry["repaired_polygons"] = repaired
+    return gdf.set_geometry(fixed)
+
+
+def settlement_types(path: Path, spec: dict) -> dict[str, str]:
+    """{農業集落コード: 農業地域類型（1次分類）}。見出しや値が定義と違えば停止する。"""
+    rows = _xlsx_rows(path)
+    if not rows or [str(c) for c in rows[0]] != spec["types_header"]:
+        raise Stop(f"rural_settlement: type table header {rows[0] if rows else None} != {spec['types_header']}")
+    ki, ti, ri = (spec["types_header"].index(spec[f]) for f in ("types_key", "types_field", "types_rcom"))
+    allowed = {c for cs in spec["type_codes"].values() for c in cs} | set(spec["type_not_applicable"])
+    out, bad = {}, Counter()
+    for r in rows[1:]:
+        if r[ri] is None or str(r[ri]) == "000":   # 都道府県・市区町村・旧市区町村の行
+            continue
+        v = str(r[ti])
+        if v not in allowed:
+            bad[v] += 1
+        out[str(r[ki])] = v
+    if bad:
+        raise Stop(f"rural_settlement: unexpected {spec['types_field']} values {dict(bad)}")
+    return out
+
+
+def rural_settlement(ctx: Ctx, spec: dict, entry: dict):
+    """農業地域類型が「都市的地域」でない（平地・中間・山間）農業集落との重なり。"""
+    bspec = ctx.cfg["datasets"][spec["boundary_from"]]
+    gdf = agri_polygons(ctx, bspec, entry, "rural_settlement")
+    types = settlement_types(fetch_pref(ctx, "rural_settlement", spec), spec)
+    code_grp = {c: g for g, cs in spec["type_codes"].items() for c in cs}
+    rec = gdf.grp == "recognized"
+    keys = gdf[bspec["key_field"]].astype(str)
+    untyped = sorted(set(keys[rec & ~keys.map(types).isin(code_grp)]))
+    if untyped:
+        raise Stop(f"rural_settlement: {len(untyped)} recognized settlements have no type, e.g. {untyped[:5]}")
+    gdf = gdf.assign(grp=gdf.grp.where(~rec, keys.map(types).map(code_grp)))
+    entry["polygons_by_type"] = dict(Counter(gdf.grp))
+    areas = gis.class_areas(ctx.towns, gdf.to_crs(gis.CRS).dissolve(by="grp", as_index=False), "grp")
+    out = {}
+    for key, total in ctx.areas.items():
+        a = areas.get(key, {})
+        known = a.get("rural", 0.0) + a.get("urban", 0.0) + a.get("not_recognized", 0.0)
+        out[key] = gis.share(total, a.get("rural", 0.0), known, ctx.min_coverage(spec))
+    return {"rural_settlement_overlap": out}
+
+
+def fishery_settlement(ctx: Ctx, spec: dict, entry: dict):
+    """漁業集落との重なり。漁業集落は沿海市区町村の漁業地区の中にだけ設定される（漁業センサスの定義）。"""
+    resp = ctx.fetcher.get(spec["page"])
+    if resp is None:
+        raise Stop(f"fishery_settlement: listing page {spec['page']} could not be fetched")
+    listed = set(re.findall(spec["pref_regex"], resp.body.decode("utf-8", "replace")))
+    if len(listed) < spec["min_listed_prefectures"]:
+        raise Stop(f"fishery_settlement: only {len(listed)} prefectures listed on {spec['page']}")
+    page = estat.Fetched("fishery_settlement:listing", True, spec["page"], hashlib.sha256(resp.body).hexdigest(),
+                         resp.body)
+    if ctx.pref not in listed:
+        _keep(ctx, "fishery_settlement", "listing", page)
+        entry["coastal"] = f"都道府県 {ctx.pref} の漁業集落境界は配布されていない（沿海市区町村なし）"
+        return {"fishery_settlement_overlap": {k: Feature.of(0.0) for k in ctx.areas}}
+    gdf = read_checked(fetch_pref(ctx, "fishery_settlement", spec), spec["member"].format(pref=ctx.pref), spec,
+                       "fishery_settlement")
+    other = gdf[spec["settlement_field"]].astype(str) == spec["other_code"]
+    names = Counter(gdf.loc[other, spec["settlement_name_field"]].astype(str))
+    if set(names) - {spec["other_name"]}:
+        raise Stop(f"fishery_settlement: {spec['settlement_field']}={spec['other_code']} named {dict(names)}")
+    gdf = repair_polygons(gdf, spec["key_field"], spec["repair_area_tolerance"], entry, "fishery_settlement")
+    gdf = gdf.assign(grp=other.map({True: "other", False: "settlement"}))
+    files = {ctx.pref + str(c): str(n) for c, n in zip(gdf[spec["city_field"]], gdf[spec["city_name_field"]])}
+    covered = set(files) | set(ward_coverage(files, ctx.municipality_names))
+    entry.update(polygons=dict(Counter(gdf.grp)), coastal_municipalities=len(files),
+                 towns_in_coastal_municipalities=sum(1 for k in ctx.areas if k[:5] in covered))
+    areas = gis.class_areas(ctx.towns, gdf.to_crs(gis.CRS).dissolve(by="grp", as_index=False), "grp")
+    out, stray = {}, 0
+    for key, total in ctx.areas.items():
+        a = areas.get(key, {})
+        s = a.get("settlement", 0.0)
+        if key[:5] in covered:
+            out[key] = gis.share(total, s, s + a.get("other", 0.0), ctx.min_coverage(spec))
+        elif total > 0 and s / total < spec["outside_tolerance"]:
+            out[key] = Feature.of(0.0)
+        else:
+            out[key], stray = Feature(None, "missing" if total > 0 else "undefined"), stray + (total > 0)
+    entry["outside_coastal_but_overlapping"] = stray
+    return {"fishery_settlement_overlap": out}
+
+
+def metro(ctx: Ctx, spec: dict, entry: dict):
+    """三大都市圏（関東・中京・近畿大都市圏）の中心市・周辺市町村なら 1（令和2年国勢調査の定義）。"""
+    rows = _xlsx_rows(fetch_pref(ctx, "metro", spec))
+    hdr = [str(c) for c in rows[spec["header_row"]]]
+    missing = [c for c in [spec["code_column"], spec["flag_column"], *spec["areas"]] if c not in hdr]
+    if missing:
+        raise Stop(f"metro: columns {missing} not in header {hdr}")
+    ci, fi = hdr.index(spec["code_column"]), hdr.index(spec["flag_column"])
+    ai = [hdr.index(c) for c in spec["areas"]]
+    table = {}
+    for r in rows[spec["header_row"] + 1:]:
+        code = str(r[ci]) if r[ci] is not None else ""
+        if not re.fullmatch(r"\d{5}", code):
+            continue
+        if r[fi] not in (None, *spec["flag_values"]):
+            raise Stop(f"metro: {code} has {spec['flag_column']}={r[fi]!r}")
+        inside = any(r[i] for i in ai)
+        if inside and r[fi] is None:
+            raise Stop(f"metro: {code} is in {spec['areas']} but has no {spec['flag_column']}")
+        table[code] = 1.0 if inside else 0.0
+    munis = {k[:5] for k in ctx.areas}
+    entry.update(municipalities_in_table=len(table), municipalities_not_in_table=sorted(munis - set(table)),
+                 municipalities_in_three_metros=sum(1 for m in munis if table.get(m) == 1.0))
+    return {"metro_core_flag": {k: Feature.of(table[k[:5]]) if k[:5] in table else Feature(None, "missing")
+                                for k in ctx.areas}}
+
+
+def _housing_table(rows: list[tuple], spec: dict) -> dict[str, tuple]:
+    """{市区町村コード: (総数, 二次的住宅)}。「-」（該当数値なし又は数字が得られない）は None。"""
+    title = " ".join(str(c) for r in rows[:3] for c in r if c)
+    if any(t not in title for t in spec["title_must_contain"]):
+        raise Stop(f"vacation_home: title {title!r} lacks {spec['title_must_contain']}")
+    hi = next((i for i, r in enumerate(rows) if spec["total_label"] in r and spec["part_label"] in r), None)
+    if hi is None:
+        raise Stop(f"vacation_home: no header row with {spec['total_label']} and {spec['part_label']}")
+    ti, pi = rows[hi].index(spec["total_label"]), rows[hi].index(spec["part_label"])
+    out = {}
+    for r in rows[hi + 1:]:
+        m = re.match(r"(\d{5})_", str(r[spec["area_column"]] or ""))
+        if not m:
+            continue
+        vals = []
+        for v in (r[ti], r[pi]):
+            if v == spec["unknown_symbol"]:
+                vals.append(None)
+            elif isinstance(v, (int, float)) and not isinstance(v, bool):
+                vals.append(float(v))
+            else:
+                raise Stop(f"vacation_home: {m.group(1)} has value {v!r}")
+        out[m.group(1)] = tuple(vals)
+    return out
+
+
+def vacation_home(ctx: Ctx, spec: dict, entry: dict):
+    """市区町村の総住宅数に占める二次的住宅の割合を、その市区町村の町丁目に付ける。"""
+    table = _housing_table(_xlsx_rows(fetch_pref(ctx, "vacation_home", spec)), spec)
+    munis = {k[:5] for k in ctx.areas}
+    per = {}
+    for m in munis & set(table):
+        total, part = table[m]
+        if total is None or part is None:
+            per[m] = Feature(None, "missing")
+        elif total == 0:
+            per[m] = Feature(None, "undefined")
+        else:
+            per[m] = Feature.of(round(part / total, 6))
+    entry.update(municipalities_published=len(munis & set(table)),
+                 municipalities_not_published=sorted(munis - set(table)),
+                 municipalities_with_symbol=sorted(m for m, f in per.items() if f.state == "missing"))
+    return {"vacation_home_share_muni": {k: per.get(k[:5], Feature(None, "missing")) for k in ctx.areas}}
+
+
+def establishment_counts(path: Path, spec: dict, member: str) -> dict[str, int]:
+    """{KEY_CODE: 事業所数}。1行目が列コード、2行目が見出し。「-」は 0（境界データの事業所数と照合する）。"""
+    import csv
+    with zipfile.ZipFile(path) as zf:
+        lines = zf.read(resolve_member(path, member)).decode(spec["encoding"]).splitlines()
+    rows = list(csv.reader(lines))
+    codes, labels = rows[0], rows[1]
+    if spec["value_column"] not in codes or labels[codes.index(spec["value_column"])] != spec["value_label"]:
+        raise Stop(f"establishments: column {spec['value_column']} ({spec['value_label']}) not found in {codes[:8]}")
+    ki, vi = codes.index(spec["key_column"]), codes.index(spec["value_column"])
+    out, bad = {}, Counter()
+    for r in rows[2:]:
+        v = r[vi]
+        if v.isdigit():
+            out[r[ki]] = int(v)
+        elif v == spec["zero_symbol"]:
+            out[r[ki]] = 0
+        else:
+            bad[v] += 1
+    if bad:
+        raise Stop(f"establishments: unexpected values {dict(bad)}")
+    return out
+
+
+def establishments(ctx: Ctx, spec: dict, entry: dict):
+    """経済センサスの町丁・大字の事業所数を、境界が国勢調査の町丁目と1対1で重なる所だけ移す。"""
+    counts = establishment_counts(fetch_url(ctx, "establishments", "table",
+                                            spec["table_url_template"].format(pref=ctx.pref)), spec,
+                                  spec["table_member"].format(pref=ctx.pref))
+    bpath = fetch_url(ctx, "establishments", "boundary", spec["boundary_url_template"].format(pref=ctx.pref))
+    bnd = read_checked(bpath, spec["boundary_member"].format(pref=ctx.pref), spec["boundary"], "establishments")
+    kf = spec["boundary"]["key_field"]
+    bnd = bnd.assign(**{kf: bnd[kf].astype(str)})
+    bnd = bnd[bnd[kf].str.fullmatch(r"\d+")]
+    check = bnd.groupby(kf)[spec["boundary"]["check_field"]].sum()
+    wrong = {k: (int(v), counts.get(k)) for k, v in check.items() if counts.get(k) != int(v)}
+    if wrong:
+        raise Stop(f"establishments: table and boundary disagree for {len(wrong)} areas, e.g. {list(wrong.items())[:5]}")
+    other = {k: v for k, v in counts.items() if k[5:].strip("9") == "" and v > 0}
+    matched = gis.match_units(ctx.towns, bnd.dissolve(by=kf, as_index=False), kf, spec["min_match_share"])
+    entry.update(areas_in_table=len(counts), areas_with_polygon=len(check),
+                 areas_without_polygon=len(set(counts) - set(check.index)),
+                 unlocated_establishments={k[:5]: v for k, v in sorted(other.items())},
+                 towns_matched=len(matched), towns_not_matched=len(ctx.areas) - len(matched),
+                 areas_not_matched=len(set(check.index) - set(matched.values())))
+    return {"establishments": {t: Feature.of(counts[u]) for t, u in matched.items()}}
 
 
 def elevation(ctx: Ctx, spec: dict, entry: dict):
@@ -380,14 +686,16 @@ def elevation(ctx: Ctx, spec: dict, entry: dict):
 
 
 HANDLERS = {"did": did, "zoning": zoning, "landuse": landuse, "land_price": land_price,
-            "agri_settlement": agri_settlement, "elevation": elevation}
+            "agri_settlement": agri_settlement, "elevation": elevation, "rural_settlement": rural_settlement,
+            "fishery_settlement": fishery_settlement, "metro": metro, "vacation_home": vacation_home,
+            "establishments": establishments}
 
 
 # ---------------------------------------------------------------------------
 # 実行
 
 def run(conn, raw_dir: Path, cfg: dict, pref: str, *, probe: bool, transport=None, sleep=None,
-        user_agent: str = "landline-atlas/1.0", datasets: list[str] | None = None) -> dict:
+        user_agent: str = "landline-atlas/1.0", datasets: list[str] | None = None, refresh: bool = False) -> dict:
     pref = prefecture_code(pref)
     keys = datasets or list(cfg["datasets"])
     unknown = [k for k in keys if k not in HANDLERS or k not in cfg["datasets"]]
@@ -405,7 +713,8 @@ def run(conn, raw_dir: Path, cfg: dict, pref: str, *, probe: bool, transport=Non
     fetcher = Fetcher(transport or UrllibTransport(timeout=300.0), user_agent=user_agent, min_interval=3.0,
                       log=None if probe else make_logger(conn, "official"), **kw)
     with tempfile.TemporaryDirectory(prefix="atlas-gis-") as tmp:
-        ctx = Ctx(fetcher, towns, cfg, pref, Path(tmp))
+        cache = RawCache(conn, raw_dir, refresh=refresh, probe=probe)
+        ctx = Ctx(fetcher, towns, cfg, pref, Path(tmp), cache)
         ctx.municipality_names = report["towns"].pop("municipality_names")
         results = {}
         for key in keys:
@@ -417,6 +726,7 @@ def run(conn, raw_dir: Path, cfg: dict, pref: str, *, probe: bool, transport=Non
                 report["stopped"] = str(exc)
                 break
             entry["features"] = {f: dict(Counter(x.state for x in v.values())) for f, v in results[key].items()}
+        report["reused_raw_files"] = len(cache.reused)
         if probe or report["stopped"]:
             return report
         for key, feats in results.items():
@@ -433,7 +743,7 @@ def _register(conn, raw_dir: Path, ctx: Ctx, key: str, spec: dict) -> str:
     """原本を保管して出典を登録する。複数ファイル（メッシュ）は束ねた出典を1つ作り、特徴量はそれを指す。"""
     ids, shas = [], []
     for unit, f, _ in ctx.files[key]:
-        store(conn, raw_dir, f, key, unit, ctx.pref)
+        store(conn, raw_dir, f, key, unit, ctx.pref, ctx.cache.fetched_at.get(f.url))
         sid = f"gis:{key}:{unit}:{f.sha256[:12]}"
         estat_tables.register(conn, sid, f"{spec['name']}（{unit}）", f.url, spec["source_year"], spec["license"],
                               f.sha256)
@@ -449,21 +759,34 @@ def _register(conn, raw_dir: Path, ctx: Ctx, key: str, spec: dict) -> str:
     return sid
 
 
-def store(conn, raw_dir: Path, fetched: estat.Fetched, dataset: str, unit: str, pref: str) -> str:
-    """原本を raw/gis/ に保存し、regions.raw_gis に記録する。同じ内容は1つだけ保存する。"""
-    sha = fetched.sha256
-    path = raw_dir / "gis" / sha[:2] / f"{sha}.zip"
+def _ext(body: bytes) -> str:
+    if not estat.is_zip(body):
+        return ".html" if body.lstrip()[:1] == b"<" else ".bin"
+    with zipfile.ZipFile(io.BytesIO(body)) as zf:
+        return ".xlsx" if "[Content_Types].xml" in zf.namelist() else ".zip"
+
+
+def _write_raw(raw_dir: Path, sha: str, body: bytes) -> str:
+    """原本を raw/gis/<sha の先頭2文字>/<sha><拡張子> に置く（同じ内容は1つ）。raw_dir からの相対パスを返す。"""
+    path = raw_dir / "gis" / sha[:2] / f"{sha}{_ext(body)}"
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=path.parent)
         with os.fdopen(fd, "wb") as fh:
-            fh.write(fetched.body)
+            fh.write(body)
         os.replace(tmp, path)
     if hashlib.sha256(path.read_bytes()).hexdigest() != sha:
         raise RuntimeError(f"stored GIS file {path} does not match {sha}")
+    return str(path.relative_to(raw_dir))
+
+
+def store(conn, raw_dir: Path, fetched: estat.Fetched, dataset: str, unit: str, pref: str,
+          fetched_at: str | None = None) -> str:
+    """原本を raw/gis/ に保存し、regions.raw_gis に記録する。同じ内容は1つだけ保存する。"""
+    stored = _write_raw(raw_dir, fetched.sha256, fetched.body)
     conn.execute("INSERT OR IGNORE INTO regions.raw_gis VALUES (?,?,?,?,?,?,?)",
-                 (sha, fetched.url, str(path.relative_to(raw_dir)), dataset, unit, pref, utc_now()))
-    return sha
+                 (fetched.sha256, fetched.url, stored, dataset, unit, pref, fetched_at or utc_now()))
+    return fetched.sha256
 
 
 STATE_JA = {"observed": "値あり", "zero": "0", "missing": "資料なし(missing)", "undefined": "面積0(undefined)"}
@@ -486,10 +809,12 @@ def render(report: dict) -> str:
         for feat, counts in d.get("features", {}).items():
             lines.append(f"  {feat}: " + "、".join(f"{STATE_JA[s]} {counts.get(s, 0):,}" for s in STATES))
         lines.append("")
+    if report.get("reused_raw_files"):
+        lines.append(f"保管済みの原本を再利用: {report['reused_raw_files']} ファイル（取り直すには --refresh）")
     if report["stopped"]:
         lines.append(f"停止しました（取り込んでいません）: {report['stopped']}")
     elif report["probe"]:
-        lines.append("確認だけ行いました。")
+        lines.append("確認だけ行いました（DB には書いていません。取得した原本は raw/gis に残し、取込で再利用します）。")
     else:
         lines.append(f"取り込みました。次は: atlas classify --census-year {report['census_year']}"
                      f" --boundary-version {report['boundary_version']}")

@@ -1,5 +1,5 @@
 {
-  "rule_version": "2026.10-draft",
+  "rule_version": "2026.10-draft.2",
   "note": "R1〜R6・L1〜L6 初期ルール。全分類 approved=false（確定は出ない）。条件は [特徴量, 演算子, 閾値, 出所]。出所 user=指示書の利用者指定（未承認）, proposed=本設計の提案（未承認）, approved=承認済み。",
   "min_margin": 0.10,
   "near_tolerance": 0.03,
@@ -24,7 +24,7 @@
            "all": [["households_general", ">=", 50, "proposed"], ["estab_per_household", ">=", 0.15, "proposed"],
                    ["zoning_commercial_ratio", ">=", 0.20, "proposed"]]},
     "L1": {"axis": "L", "role": "main", "name": "農村集落", "approved": false,
-           "all": [["agri_settlement_overlap", ">=", 0.50, "proposed"], ["farmland_ratio", ">=", 0.20, "proposed"],
+           "all": [["rural_settlement_overlap", ">=", 0.50, "proposed"], ["farmland_ratio", ">=", 0.20, "proposed"],
                    ["did_flag", "==", 0, "proposed"], ["households_general", ">=", 1, "proposed"]]},
     "L2": {"axis": "L", "role": "main", "name": "漁村集落", "approved": false,
            "all": [["fishery_settlement_overlap", ">=", 0.30, "proposed"], ["did_flag", "==", 0, "proposed"],

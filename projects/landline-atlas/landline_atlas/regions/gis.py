@@ -212,3 +212,26 @@ def percentile_rank(values: Mapping[str, float]) -> dict[str, float]:
             out[k] = round(r, 6)
         i = j + 1
     return out
+
+
+def match_units(towns, units, unit_field: str, min_share: float, *, key_field: str = "town_key") -> dict[str, str]:
+    """{町丁目: 別の境界の単位}。重なりが町丁目の面積と単位の面積の両方の min_share 以上のときだけ対応とする。
+
+    経済センサスの町丁・大字のように、国勢調査と別に引かれた境界の値を町丁目へ移すときに使う。
+    分割・統合・境界線の付け替えがある地域は対応しない（値を按分しない）。"""
+    import geopandas as gpd
+    t = towns[[key_field, "geometry"]].to_crs(CRS)
+    u = units[[unit_field, "geometry"]].to_crs(CRS)
+    t_area = dict(zip(t[key_field], geodesic_areas(t.geometry)))
+    u_area: dict[str, float] = {}
+    for unit, a in zip(u[unit_field].astype(str), geodesic_areas(u.geometry)):   # 飛び地は同じ単位の複数の図形
+        u_area[unit] = u_area.get(unit, 0.0) + a
+    pieces = gpd.overlay(t, u, how="intersection", keep_geom_type=True)
+    inter: dict[tuple[str, str], float] = {}
+    for key, unit, a in zip(pieces[key_field], pieces[unit_field].astype(str), geodesic_areas(pieces.geometry)):
+        inter[(key, unit)] = inter.get((key, unit), 0.0) + a
+    out = {}
+    for (key, unit), a in inter.items():
+        if t_area[key] > 0 and u_area[unit] > 0 and a / t_area[key] >= min_share and a / u_area[unit] >= min_share:
+            out[key] = unit
+    return out

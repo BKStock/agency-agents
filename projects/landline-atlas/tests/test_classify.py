@@ -71,7 +71,7 @@ class ClassifyTest(unittest.TestCase):
         for code in ("R1", "R2", "R6", "L1", "L2", "L3", "L4"):
             self.assertEqual(st[code], "insufficient_data", code)
         ev = json.loads(self.row("03215000400", "L1")["evidence_json"])
-        self.assertIn({"feature": "agri_settlement_overlap", "state": "missing", "value": None},
+        self.assertIn({"feature": "rural_settlement_overlap", "state": "missing", "value": None},
                       [{k: c[k] for k in ("feature", "state", "value")} for c in ev["conditions"]])
 
     def test_r3_requires_cross_evidence(self):  # 受入7

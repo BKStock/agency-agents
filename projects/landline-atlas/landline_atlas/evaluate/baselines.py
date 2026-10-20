@@ -20,7 +20,7 @@ from ..regions.features import derive, load_latest
 
 B0 = ("detached_ratio", "apartment_ratio", "owner_ratio", "rental_ratio", "public_rental_ratio", "aging_rate",
       "pop_change_10y", "pop_density", "estab_per_household", "did_flag")
-B1 = B0 + ("agri_settlement_overlap", "fishery_settlement_overlap", "farmland_ratio", "forest_ratio",
+B1 = B0 + ("rural_settlement_overlap", "fishery_settlement_overlap", "farmland_ratio", "forest_ratio",
            "slope_mean_deg", "zoning_residential_ratio", "zoning_commercial_ratio", "land_price_pref_pct",
            "metro_core_flag", "uea_member", "vacation_home_share_muni")
 NUMERIC = {"B0": B0, "B1": B1, "B2": B1}

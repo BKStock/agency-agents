@@ -91,10 +91,13 @@ def land_price_zip(year="2020"):
 
 
 def agri_zip(flag_for_999=1):
-    base = {"KEY": "", "PREF": "39", "CITY": "201", "KCITY": "01"}
-    rows = [{**base, "RCOM": "001", "RCOM_NAME": "架空集落", "HININTEI": 0, "geometry": cols(133.000, 133.010)},
-            {**base, "RCOM": "999", "RCOM_NAME": None, "HININTEI": flag_for_999, "geometry": cols(133.010, 133.020)},
-            {**base, "RCOM": "901", "RCOM_NAME": "埋立地", "HININTEI": 1, "geometry": cols(133.020, 133.030)}]
+    base = {"PREF": "39", "CITY": "201", "KCITY": "01"}
+    rows = [{**base, "KEY": "3920101001", "RCOM": "001", "RCOM_NAME": "架空集落", "HININTEI": 0,
+             "geometry": cols(133.000, 133.010)},
+            {**base, "KEY": "3920101999", "RCOM": "999", "RCOM_NAME": None, "HININTEI": flag_for_999,
+             "geometry": cols(133.010, 133.020)},
+            {**base, "KEY": "3920101901", "RCOM": "901", "RCOM_NAME": "埋立地", "HININTEI": 1,
+             "geometry": cols(133.020, 133.030)}]
     return shp_zip({"MA0001_2020_2020_39/rcom.shp": gdf(rows, "EPSG:4612")}, encoding="cp932")
 
 
@@ -106,20 +109,118 @@ def elevation_zip():
     return shp_zip({"G04-d-11_4933-jgd_ElevationAndSlopeAngleFifthMesh.shp": gdf(rows, "EPSG:4612")}, drop_prj=True)
 
 
+def xlsx(rows) -> bytes:
+    import openpyxl
+    wb = openpyxl.Workbook()
+    for r in rows:
+        wb.active.append(list(r))
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def types_xlsx(settlement_type=3, extra=()):
+    head = D["rural_settlement"]["types_header"]
+    rows = [head, ["3900000000", "39", "000", "00", "000", "高知県", "…", "…", None, "…", "…"],
+            ["3920101000", "39", "201", "01", "000", "高知県", "架空市", "（旧）", None, 3, 1],
+            ["3920101001", "39", "201", "01", "001", "高知県", "架空市", "（旧）", "架空集落", settlement_type, 1],
+            ["3920101999", "39", "201", "01", "999", "高知県", "架空市", "（旧）", "", "…", "…"], *extra]
+    return xlsx(rows)
+
+
+def scaled(points, x0=133.000):
+    """4×4 の格子の座標を町丁目 A の範囲（0.01 度四方）に置く。"""
+    from shapely.geometry import Polygon
+    return Polygon([(x0 + u * 0.0025, Y0 + v * 0.0025) for u, v in points])
+
+
+SELF_TOUCH = [(0, 0), (4, 0), (4, 4), (2, 4), (3, 2), (1, 2), (2, 4), (0, 4)]   # 1点で自分に接する（実物の形）
+BOWTIE = [(0, 0), (4, 4), (4, 0), (0, 4)]                                         # 直すと面積が変わる
+
+
+def fishery_zip(other_name="その他地域", settlement_geom=None):
+    base = {"PREF": "39", "CITY": "201", "GAREA": "001", "CITY_NAME": "架空市", "GAREA_NAME": "架空浦"}
+    return shp_zip({"MB0001_2023_39/shuraku.shp": gdf([
+        {**base, "KEY": "39201001001", "GCOM": "001", "GCOM_NAME": "架空浦",
+         "geometry": settlement_geom or cols(133.000, 133.010)},
+        {**base, "KEY": "39201001999", "GCOM": "999", "GCOM_NAME": other_name, "geometry": cols(133.010, 133.020)}])},
+        encoding="cp932")
+
+
+def fishery_listing(prefs=None):
+    prefs = prefs or [f"{i:02d}" for i in range(1, 48) if i not in (9, 10, 11, 19, 20, 21, 25, 29)]
+    return "".join(f'<a href="/j/tokei/census/fc/database/mapdata/MB0001_2023_{p}.zip">{p}</a>' for p in prefs).encode()
+
+
+def metro_xlsx(flag="中心市"):
+    head = ["市区町村コード", "市区町村名", "大都市圏フラグ", "都市圏フラグ", "札幌大都市圏", "関東大都市圏",
+            "中京大都市圏", "近畿大都市圏", "松山都市圏"]
+    return xlsx([["令和２年国勢調査　大都市圏・都市圏　対象市区町村データ（総務省統計局）"], head,
+                 ["39201", "架空市", flag, None, None, None, None, "近畿", None],
+                 ["39202", "別市", None, None, None, None, None, None, None]])
+
+
+def housing_xlsx(second_home=50):
+    return xlsx([["令和５年住宅・土地統計調査　住宅及び世帯に関する基本集計"],
+                 ["第１－２表　居住世帯の有無(8区分)別住宅数及び住宅以外で人が居住する建物数－全国、都道府県、市区町村"],
+                 [None], [None, "表章項目", "住宅数", "住宅数"],
+                 [None, "項目名", "0_総数", "1_居住世帯あり", "224_二次的住宅"],
+                 ["地域識別コード", "地域区分", " "],
+                 ["a", "39000_高知県", 388100, 307400, 2500],
+                 ["2", "39201_架空市", 1000, 900, second_home],
+                 ["2", "39202_別市", 800, 700, "-"]])
+
+
+EC_A, EC_B1, EC_B2, EC_C = "39201000100000100", "39201000200000200", "39201000300000300", "39202000100000100"
+
+
+def estab_table_zip(a_count="12"):
+    head = "KEY_CODE,CITY_NAME,AZA_CODE,AZA_NAME," + ",".join(f"T001168{i:03d}" for i in range(1, 17))
+    labels = ",,,,0_総数,1_民営,11_個人,12_法人,121_会社,122_会社以外の法人,13_法人でない団体,2_国、地方公共団体," \
+             "0_総数,1_民営,11_個人,12_法人,121_会社,122_会社以外の法人,13_法人でない団体,2_国、地方公共団体"
+    def row(key, name, n, m):
+        return f"{key},架空市,{key[5:]},{name},{n}," + ",".join(["-"] * 7) + f",{m}," + ",".join(["-"] * 7)
+    lines = [head, labels, row(EC_A, "甲町", a_count, "90"), row(EC_B1, "乙町１丁目", "5", "20"),
+             row(EC_B2, "乙町２丁目", "-", "-"), row(EC_C, "丙町", "-", "-"),
+             row("39201999999999999", "その他", "3", "4")]
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("tblT001168C39.txt", "\r\n".join(lines).encode("cp932"))
+    return buf.getvalue()
+
+
+def estab_boundary_zip(jigyosho_a=12):
+    def r(key, kigo, n, g):
+        return {"KEY_CODE": key, "S_AREA": key and key[5:], "KIGO_E": kigo, "JIGYOSHO": n, "geometry": g}
+    # 甲町は飛び地（E1 に代表して事業所数、E2 は 0）。乙町は国勢調査の B を2つに分けた形（B とは対応しない）
+    return shp_zip({"r3ca39.shp": gdf([
+        r(EC_A, "E1", jigyosho_a, cols(133.000, 133.006)), r(EC_A, "E2", 0, cols(133.006, 133.010)),
+        r(EC_B1, None, 5, cols(133.010, 133.016)), r(EC_B2, None, 0, cols(133.016, 133.020)),
+        r(EC_C, None, 0, cols(133.020, 133.030)), r(None, None, 0, cols(133.030, 133.031))])}, encoding="cp932")
+
+
 def routes(**override):
     listing = b"<a onclick=\"DownLd('1MB','L03-b-21_4933-jgd2011_GML.zip','x')\">L03-b-21_5339-jgd2011_GML.zip</a>"
     g04 = b"G04-d-11_4933-jgd_GML.zip G04-d-11_5339-jgd_GML.zip"
-    bodies = {"did": did_zip(), "zoning": zoning_zip(), "land_price": land_price_zip(), "agri_settlement": agri_zip()}
-    bodies.update(override)
+    bodies = {"did": did_zip(), "zoning": zoning_zip(), "land_price": land_price_zip(), "agri_settlement": agri_zip(),
+              "rural_settlement": types_xlsx(), "fishery_settlement": fishery_zip(), "metro": metro_xlsx(),
+              "vacation_home": housing_xlsx()}
+    bodies.update({k: v for k, v in override.items() if k in bodies})
     r = {u: [(404, b"")] for u in ("https://nlftp.mlit.go.jp/robots.txt", "https://www.maff.go.jp/robots.txt",
-                                    "https://www.machimura.maff.go.jp/robots.txt")}
+                                    "https://www.machimura.maff.go.jp/robots.txt", "https://www.stat.go.jp/robots.txt",
+                                    "https://www.e-stat.go.jp/robots.txt")}
     for key, body in bodies.items():
         r[D[key]["url_template"].format(pref=PREF)] = [(200, body)]
+    r[D["fishery_settlement"]["page"]] = [(200, override.get("fishery_listing", fishery_listing()))]
+    r[D["establishments"]["table_url_template"].format(pref=PREF)] = [(200, override.get("estab_table", estab_table_zip()))]
+    r[D["establishments"]["boundary_url_template"].format(pref=PREF)] = [
+        (200, override.get("estab_boundary", estab_boundary_zip()))]
     r[D["landuse"]["page"]] = [(200, listing)]
     r[D["landuse"]["url_template"].format(mesh="4933")] = [(200, landuse_zip())]
     r[D["elevation"]["page"]] = [(200, g04)]
     r[D["elevation"]["url_template"].format(mesh="4933")] = [(200, elevation_zip())]
     return r
+
 
 
 @unittest.skipIf(gpd is None, "GIS の任意依存（geopandas）が無い")
@@ -155,6 +256,17 @@ class GisFunctionsTest(unittest.TestCase):
         self.assertAlmostEqual(gis.mean_feature(total, sums[A]["v"], 0.95).value, 20.0, places=4)
         self.assertEqual(gis.mean_feature(total, [5.0, total * 0.5], 0.95).state, "missing")
 
+
+    def test_match_units_one_to_one_only(self):
+        from landline_atlas.regions import gis
+        towns = gdf([{"town_key": A, "geometry": cols(133.00, 133.01)},
+                     {"town_key": B, "geometry": cols(133.01, 133.02)},
+                     {"town_key": C, "geometry": cols(133.02, 133.03)}])
+        units = gdf([{"u": "same", "geometry": cols(133.00, 133.01)},
+                     # B は2つの単位に分かれ、C は飛び地を町丁目の外にもつ単位に含まれる（どちらも対応しない）
+                     {"u": "half1", "geometry": cols(133.01, 133.015)}, {"u": "half2", "geometry": cols(133.015, 133.02)},
+                     {"u": "enclave", "geometry": cols(133.02, 133.03)}, {"u": "enclave", "geometry": cols(133.03, 133.04)}])
+        self.assertEqual(gis.match_units(towns, units, "u", 0.95), {A: "same"})
 
 @unittest.skipIf(gpd is None, "GIS の任意依存（geopandas）が無い")
 class FetchGisTest(unittest.TestCase):
@@ -197,8 +309,11 @@ class FetchGisTest(unittest.TestCase):
         self.assertEqual(rep["datasets"]["agri_settlement"]["polygons"],
                          {"recognized": 1, "not_recognized": 1, "uncertain": 1})
         self.assertEqual(rep["datasets"]["agri_settlement"]["uncertain"]["rcom"], {"901": 1})
-        self.assertEqual((self.count("town_feature"), self.count("raw_gis")), (0, 0))
-        self.assertFalse((self.raw / "gis").exists())
+        self.assertEqual((self.count("town_feature"), self.count("raw_gis"), self.count("data_load"),
+                          self.count("source_document")), (0, 0, 0, 1))
+        # 原本は raw/gis に残し（DB には書かない）、索引に URL と SHA-256 を載せる
+        index = json.loads((self.raw / "gis" / "probe_index.json").read_text(encoding="utf-8"))
+        self.assertIn(D["did"]["url_template"].format(pref=PREF), index)
         from landline_atlas import gis_fetch
         self.assertIn("確認モード", gis_fetch.render(rep))
 
@@ -225,8 +340,24 @@ class FetchGisTest(unittest.TestCase):
         self.assertEqual(f[(B, "elevation_mean_m")], (None, "missing"))     # unknown のセルだけ
         self.assertAlmostEqual(f[(C, "slope_mean_deg")][0], 10.0, places=3)
         self.assertEqual(rep["datasets"]["land_price"]["points_outside_towns"], 1)
-        # 原本の保管と出典（ファイルごと SHA-256・利用条件）
-        self.assertEqual(self.count("raw_gis"), 6)
+        self.assertEqual(f[(A, "rural_settlement_overlap")], (1.0, "observed"))   # 中間農業地域の集落
+        self.assertEqual(f[(B, "rural_settlement_overlap")], (0.0, "zero"))
+        self.assertEqual(f[(C, "rural_settlement_overlap")], (None, "missing"))
+        self.assertEqual(f[(A, "fishery_settlement_overlap")], (1.0, "observed"))
+        self.assertEqual(f[(B, "fishery_settlement_overlap")], (0.0, "zero"))     # その他地域
+        self.assertEqual(f[(C, "fishery_settlement_overlap")], (0.0, "zero"))     # 沿海市区町村でない
+        self.assertEqual((f[(A, "metro_core_flag")], f[(C, "metro_core_flag")]), ((1.0, "observed"), (0.0, "zero")))
+        self.assertEqual(f[(A, "vacation_home_share_muni")], (0.05, "observed"))
+        self.assertEqual(f[(C, "vacation_home_share_muni")], (None, "missing"))    # 「-」は 0 と区別できない
+        self.assertEqual(f[(A, "establishments")], (12.0, "observed"))             # 飛び地は E1 に代表
+        self.assertEqual(f[(C, "establishments")], (0.0, "zero"))                  # 「-」＝境界の JIGYOSHO 0
+        self.assertNotIn((B, "establishments"), f)                                 # 境界が1対1で重ならない
+        e = rep["datasets"]["establishments"]
+        self.assertEqual((e["towns_matched"], e["towns_not_matched"], e["areas_not_matched"]), (2, 1, 2))
+        self.assertEqual((e["areas_in_table"], e["areas_with_polygon"], e["areas_without_polygon"]), (5, 4, 1))   # 「その他」
+        self.assertEqual(e["unlocated_establishments"], {"39201": 3})
+        # 原本の保管と出典（ファイルごと SHA-256・利用条件）。農業集落境界は2つのデータで同じ原本を使う
+        self.assertEqual(self.count("raw_gis"), 12)
         for path, sha in self.conn.execute("SELECT stored_path, sha256 FROM regions.raw_gis"):
             import hashlib
             self.assertEqual(hashlib.sha256((self.raw / path).read_bytes()).hexdigest(), sha)
@@ -261,6 +392,102 @@ class FetchGisTest(unittest.TestCase):
         del cfg["datasets"]["elevation"]["crs_if_missing"]
         rep = self.run_fetch(probe=True, cfg=cfg)
         self.assertIn("has no CRS", rep["stopped"])
+
+    def test_settlement_type_urban_is_not_rural(self):
+        self.run_fetch(probe=False, r=routes(rural_settlement=types_xlsx(settlement_type=1)))
+        self.assertEqual(self.features()[(A, "rural_settlement_overlap")], (0.0, "zero"))
+
+    def test_untyped_settlement_stops(self):
+        self.assert_stops(routes(rural_settlement=types_xlsx(settlement_type="…")), "have no type")
+
+    def test_unexpected_settlement_type_stops(self):
+        self.assert_stops(routes(rural_settlement=types_xlsx(settlement_type=5)), "unexpected 地域類型1次分類 values")
+
+    def test_fishery_other_code_with_other_name_stops(self):
+        self.assert_stops(routes(fishery_settlement=fishery_zip(other_name="架空")), "GCOM=999 named")
+
+    def test_fishery_invalid_polygon_is_repaired(self):
+        rep = self.run_fetch(probe=False, r=routes(fishery_settlement=fishery_zip(settlement_geom=scaled(SELF_TOUCH))))
+        self.assertTrue(rep["imported"], rep["stopped"])
+        self.assertEqual(rep["datasets"]["fishery_settlement"]["repaired_polygons"], ["39201001001"])
+        # 1/8 が切れ込みで欠けるので、値が分かる部分が min_coverage 未満になる（0 で埋めない）
+        self.assertEqual(self.features()[(A, "fishery_settlement_overlap")], (None, "missing"))
+
+    def test_fishery_repair_changing_area_stops(self):
+        self.assert_stops(routes(fishery_settlement=fishery_zip(settlement_geom=scaled(BOWTIE))), "changes its area")
+
+    def test_fishery_prefecture_not_listed_is_zero(self):
+        self.run_fetch(probe=False, r=routes(fishery_listing=fishery_listing(["01", "27"] + [f"{i}" for i in range(40, 70)])))
+        f = self.features()
+        self.assertEqual({f[(k, "fishery_settlement_overlap")] for k in (A, B, C)}, {(0.0, "zero")})
+        src = self.conn.execute("SELECT url FROM regions.source_document WHERE source_id LIKE 'gis:fishery_settlement:%'")
+        self.assertEqual([r[0] for r in src], [D["fishery_settlement"]["page"]])
+
+    def test_metro_unexpected_flag_stops(self):
+        self.assert_stops(routes(metro=metro_xlsx(flag="郊外")), "大都市圏フラグ='郊外'")
+
+    def test_establishments_table_boundary_disagree_stops(self):
+        self.assert_stops(routes(estab_boundary=estab_boundary_zip(jigyosho_a=11)), "table and boundary disagree")
+
+    def test_establishments_unexpected_symbol_stops(self):
+        self.assert_stops(routes(estab_table=estab_table_zip(a_count="X")), "unexpected values {'X': 1}")
+
+    def test_settlement_type_header_changed_stops(self):
+        rows = [D["rural_settlement"]["types_header"][:-1] + ["地域類型3次分類"],
+                ["3920101001", "39", "201", "01", "001", "高知県", "架空市", "（旧）", "架空集落", 3, 1]]
+        self.assert_stops(routes(rural_settlement=xlsx(rows)), "type table header")
+
+    def test_fishery_listing_too_short_stops(self):
+        self.assert_stops(routes(fishery_listing=fishery_listing(["39", "27"])), "only 2 prefectures listed")
+
+    def test_metro_area_without_flag_stops(self):
+        self.assert_stops(routes(metro=metro_xlsx(flag=None)), "is in")
+
+    def test_housing_table_title_changed_stops(self):
+        body = housing_xlsx()
+        import openpyxl
+        wb = openpyxl.load_workbook(io.BytesIO(body))
+        wb.active["A1"], wb.active["A2"] = "平成30年住宅・土地統計調査", "第１－１表"
+        buf = io.BytesIO()
+        wb.save(buf)
+        self.assert_stops(routes(vacation_home=buf.getvalue()), "vacation_home: title")
+
+    def test_housing_unexpected_symbol_stops(self):
+        self.assert_stops(routes(vacation_home=housing_xlsx(second_home="x")), "39201 has value 'x'")
+
+    def test_probe_then_import_reuses_raw_files(self):
+        from landline_atlas import gis_fetch
+        t = FakeTransport(routes())
+        gis_fetch.run(self.conn, self.raw, CFG, PREF, probe=True, transport=t, sleep=lambda s: None)
+        downloads = [u for u in t.calls if not u.endswith("robots.txt") and u not in self.pages()]
+        self.assertEqual(len(downloads), len(set(downloads)))     # 同じ実行の中でも同じ URL は1回
+        t.calls.clear()
+        rep = gis_fetch.run(self.conn, self.raw, CFG, PREF, probe=False, transport=t, sleep=lambda s: None)
+        self.assertTrue(rep["imported"], rep["stopped"])
+        self.assertEqual([u for u in t.calls if not u.endswith("robots.txt") and u not in self.pages()], [])
+        self.assertEqual(rep["reused_raw_files"], len(set(downloads)))
+        t.calls.clear()
+        gis_fetch.run(self.conn, self.raw, CFG, PREF, probe=True, transport=t, sleep=lambda s: None, refresh=True)
+        self.assertEqual(sorted(set(u for u in t.calls if u in downloads)), sorted(set(downloads)))
+
+    def test_tampered_raw_file_is_not_reused(self):
+        from landline_atlas import gis_fetch
+        t = FakeTransport(routes())
+        gis_fetch.run(self.conn, self.raw, CFG, PREF, probe=True, transport=t, sleep=lambda s: None,
+                      datasets=["did"])
+        index = json.loads((self.raw / "gis" / "probe_index.json").read_text(encoding="utf-8"))
+        url = D["did"]["url_template"].format(pref=PREF)
+        (self.raw / index[url]["stored_path"]).write_bytes(b"PK broken")
+        t.calls.clear()
+        # 壊れた原本は使わずに取り直す。保管済みのファイルは上書きせず（消さない）、食い違いで止める
+        with self.assertRaisesRegex(RuntimeError, "does not match"):
+            gis_fetch.run(self.conn, self.raw, CFG, PREF, probe=True, transport=t, sleep=lambda s: None,
+                          datasets=["did"])
+        self.assertIn(url, t.calls)
+        self.assertEqual((self.raw / index[url]["stored_path"]).read_bytes(), b"PK broken")
+
+    def pages(self):
+        return {D["landuse"]["page"], D["elevation"]["page"], D["fishery_settlement"]["page"]}
 
     def test_no_boundary_stops(self):
         from landline_atlas import gis_fetch
