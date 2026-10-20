@@ -32,6 +32,8 @@ diff /tmp/before.txt /tmp/after.txt && echo "unchanged"
    - 確認方法：`atlas update`（Wayback なし）を実行し、`run_manifest.json` の `acquire.collected` と `numbers.raw_source.series` を見る。
 2. **`config/layouts.json`**：見出し語が実際の表の見出しと一致するか。
    - 一致しない場合は `Q00_unknown_layout` で停止し、`outcome: blocked_by_qa` になります。その場合は見出し語を追加してください。
+   - 総務省のページには、携帯・IP電話・フリーダイヤル・IMSI などの固定電話以外の表も並んでいます。見出しが見つからず、題名（見出しより上の行）が `out_of_scope_titles` の語を含む表は、対象外として飛ばします（`Q00b_out_of_scope`、情報。`run_manifest.json` の `ingest.out_of_scope` に一覧）。原本は保管したままです。
+   - 新しい種類の表が増えて Q00 で止まったときは、題名を見て固定電話以外なら `out_of_scope_titles` に語を足し、固定電話の表なら見出し語を足してください。
 3. **`in_use_values`**：「使用中」を表す実際の表記。
    - 確認方法：`SELECT usage_status, COUNT(*) FROM numbers.designation_row GROUP BY 1` で表記を確かめて設定する。
 

@@ -97,6 +97,23 @@ class PipelineTest(unittest.TestCase):
         self.assertFalse(m["stages"]["qa"]["Q00_unknown_layout"]["passed"])
         self.assertNotIn("classify", m["stages"])
 
+    def test_out_of_scope_table_does_not_block(self):
+        from openpyxl import Workbook
+        import io
+        wb = Workbook()
+        for row in (["電気通信番号指定状況"], ["・ＩＰ電話の番号（０５０－ＣＤＥＦ－ＧＨＪＫ）"], ["番号", "０", "１"]):
+            wb.active.append(row)
+        buf = io.BytesIO()
+        wb.save(buf)
+        ip = Path(self.tmp.name) / "050.xlsx"
+        ip.write_bytes(buf.getvalue())
+        m = update(self.paths, online=False, local_files=[ip], do_export=False)
+        self.assertEqual(m["outcome"], "ok")
+        self.assertEqual(m["stages"]["ingest"]["unknown_layouts"], [])
+        self.assertEqual([f["keyword"] for f in m["stages"]["ingest"]["out_of_scope"]], ["IP電話"])
+        self.assertTrue(m["stages"]["qa"]["Q00b_out_of_scope"]["passed"])
+        self.assertNotIn("Q00_unknown_layout", m["stages"]["qa"])
+
     def test_search_relations_and_priority(self):  # 受入4, 11
         conn = connect(self.paths.db, read_only=True)
         hidden = search(conn, Filter(prefecture="27", mode="residential"))

@@ -6,6 +6,8 @@
 * セルは文字列として扱う。数値セルの市外局番で先頭 0 が落ちていれば補い、補正として記録する
 * 結合セル由来の空欄（市外局番・番号区画）は上の行から引き継ぎ、補正として記録する
 * 基準日は表の記載（「令和6年4月1日現在」など）から読む
+* 同じページに並ぶ固定電話以外の表（携帯・IP電話・フリーダイヤル等）は、題名が
+  `out_of_scope_titles` の語を含むときだけ対象外として飛ばす。題名が一覧に無ければ未知の表形式として止める
 """
 
 from __future__ import annotations
@@ -29,6 +31,14 @@ TABLE_EXTS = (".xls", ".xlsx", ".csv")
 
 class UnknownLayout(ValueError):
     pass
+
+
+class OutOfScope(Exception):
+    """固定電話以外の番号の表（題名で判定）。未知の表形式とは別に扱い、取込も停止もしない。"""
+
+    def __init__(self, name: str, keyword: str):
+        super().__init__(f"{name}: out of scope (title contains {keyword!r})")
+        self.keyword = keyword
 
 
 @dataclass
@@ -79,6 +89,19 @@ def _find_header(rows: list[list], layout: dict) -> tuple[int, dict[str, int]] |
                     break
         if all(c["name"] in mapping for c in layout["columns"] if c.get("required")):
             return i, mapping
+    return None
+
+
+def _out_of_scope_keyword(sheets: list[tuple[str, list[list]]], layout: dict) -> str | None:
+    """見出しより上（題名の行）に、固定電話以外を表す語があればその語を返す。"""
+    keywords = [(k, compact(k)) for k in layout.get("out_of_scope_titles", [])]
+    for _, rows in sheets:
+        for row in rows[: layout.get("header_search_rows", 40)]:
+            for cell in row:
+                text = compact(cell)
+                hit = next((k for k, ck in keywords if ck and ck in text), None)
+                if hit:
+                    return hit
     return None
 
 
@@ -136,17 +159,23 @@ def parse_sheet(rows: list[list], layout: dict) -> tuple[date | None, list[dict]
 def parse_file(name: str, body: bytes, layout: dict) -> list[ParsedTable]:
     """1つの原本から ParsedTable の列を返す（ZIP なら中の表ファイルごと）。"""
     if name.lower().endswith(".zip"):
-        tables = []
+        tables, out_of_scope = [], None
         with zipfile.ZipFile(io.BytesIO(body)) as zf:
             for info in sorted(zf.infolist(), key=lambda i: i.filename):
                 if info.is_dir() or not info.filename.lower().endswith(TABLE_EXTS):
                     continue
-                tables += [_with_member(t, info.filename) for t in parse_file(info.filename, zf.read(info), layout)]
+                try:
+                    tables += [_with_member(t, info.filename) for t in parse_file(info.filename, zf.read(info), layout)]
+                except OutOfScope as exc:
+                    out_of_scope = exc
+        if not tables and out_of_scope:
+            raise OutOfScope(name, out_of_scope.keyword)
         if not tables:
             raise UnknownLayout(f"{name}: no table files inside ZIP")
         return tables
     parsed_rows, dates, used, skipped = [], [], [], 0
-    for sheet_name, rows in _sheets(name, body):
+    sheets = _sheets(name, body)
+    for sheet_name, rows in sheets:
         result = parse_sheet(rows, layout)
         if result is None:
             continue
@@ -156,6 +185,9 @@ def parse_file(name: str, body: bytes, layout: dict) -> list[ParsedTable]:
         parsed_rows += recs
         skipped += sk
     if not used:
+        keyword = _out_of_scope_keyword(sheets, layout)
+        if keyword:
+            raise OutOfScope(name, keyword)
         raise UnknownLayout(f"{name}: required headers {[c['aliases'][0] for c in layout['columns'] if c.get('required')]}"
                             " not found; update config/layouts.json after checking the file")
     known = sorted({d for d in dates if d})

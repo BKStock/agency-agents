@@ -135,6 +135,33 @@ class ArchiveIngestTest(unittest.TestCase):
         with self.assertRaises(designation.UnknownLayout):
             designation.parse_file("x.xlsx", buf.getvalue(), layout())
 
+    def test_non_landline_table_is_out_of_scope(self):
+        # 実データ：同じページに携帯・IP電話・フリーダイヤル等の表も並んでいる（見出しは「番号」「０」〜「９」）
+        from openpyxl import Workbook
+        import io
+        wb = Workbook()
+        for row in (["電気通信番号指定状況"], ["・携帯電話・ＰＨＳ番号（０９０－ＣＤＥＦ－ＧＨＪＫ）"],
+                    ["(令和６年９月１日現在)"], ["番号", "０", "１", "２"]):
+            wb.active.append(row)
+        buf = io.BytesIO()
+        wb.save(buf)
+        with self.assertRaises(designation.OutOfScope) as cm:
+            designation.parse_file("000697567.xlsx", buf.getvalue(), layout())
+        self.assertEqual(cm.exception.keyword, "携帯電話")
+        self.assertNotIsInstance(cm.exception, designation.UnknownLayout)
+
+    def test_out_of_scope_needs_listed_title(self):
+        # 題名が対象外の一覧に無ければ、従来どおり未知の表形式として止める
+        from openpyxl import Workbook
+        import io
+        wb = Workbook()
+        for row in (["電気通信番号指定状況"], ["・新しい番号の種類"], ["番号", "事業者"]):
+            wb.active.append(row)
+        buf = io.BytesIO()
+        wb.save(buf)
+        with self.assertRaises(designation.UnknownLayout):
+            designation.parse_file("x.xlsx", buf.getvalue(), layout())
+
     def ingest_three(self):
         for ts, rows, text in (("2023", V2023, "令和5年4月1日現在"), ("2024", V2024, "令和6年4月1日現在"),
                                ("2025", V2025, "令和7年1月1日現在")):

@@ -70,7 +70,7 @@ def update(paths: DataPaths, *, config_dir: Path = CONFIG_DIR, online: bool = Tr
         todo = conn.execute("""SELECT DISTINCT s.sha256 FROM numbers.raw_source s
                                WHERE NOT EXISTS (SELECT 1 FROM numbers.version v
                                                  WHERE v.sha256 = s.sha256)""").fetchall()
-        parsed, errors = 0, []
+        parsed, errors, skipped = 0, [], []
         for r in todo:
             try:
                 parsed += len(designation.ingest(conn, paths.raw, r["sha256"], layout))
@@ -78,7 +78,10 @@ def update(paths: DataPaths, *, config_dir: Path = CONFIG_DIR, online: bool = Tr
             except designation.UnknownLayout as exc:
                 conn.rollback()
                 errors.append({"sha256": r["sha256"], "error": str(exc)})
-        manifest["stages"]["ingest"] = {"new_versions": parsed, "unknown_layouts": errors}
+            except designation.OutOfScope as exc:
+                conn.rollback()
+                skipped.append({"sha256": r["sha256"], "keyword": exc.keyword, "error": str(exc)})
+        manifest["stages"]["ingest"] = {"new_versions": parsed, "unknown_layouts": errors, "out_of_scope": skipped}
 
         # 3. 版選択と差分
         decisions = versions.select_versions(conn)
@@ -99,6 +102,11 @@ def update(paths: DataPaths, *, config_dir: Path = CONFIG_DIR, online: bool = Tr
                                     bulk_min_rows=layout.get("bulk_min_rows", 30), carriers=carriers)
         if errors:
             results.append(checks.Check("Q00_unknown_layout", "error", False, {"files": errors}))
+        if skipped:
+            by_kw: dict[str, int] = {}
+            for f in skipped:
+                by_kw[f["keyword"]] = by_kw.get(f["keyword"], 0) + 1
+            results.append(checks.Check("Q00b_out_of_scope", "info", True, {"files": len(skipped), "by_keyword": by_kw}))
         checks.record(conn, pid, results)
         conn.commit()
         manifest["stages"]["qa"] = {c.check_id: {"severity": c.severity, "passed": c.passed} for c in results}
