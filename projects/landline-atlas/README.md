@@ -13,7 +13,7 @@
 > **状態**
 > - 最初の作成環境では、soumu.go.jp・e-stat.go.jp・web.archive.org への接続がネットワーク方針で拒否されました。総務省の原本はその後 Mac 上で取得しています。e-Stat の小地域データは `atlas fetch-census` で取得します（手順は [docs/operations.md](docs/operations.md)）。
 > - テストは、合成データと模擬 HTTP 応答によるものです（実データで出た事例を合成データに写したものを含む）。
-> - 2026-10-20 に、Mac 上で取得済みの総務省の原本（固定電話 9 系統の過去版を含む）に対して `atlas update --offline` が `outcome: ok` で通りました（固定電話以外の表は対象外として飛ばす。[docs/operations.md](docs/operations.md)）。町丁目マスタは未取込のため、分類はまだ行っていません。
+> - 2026-10-20 に、Mac 上で取得済みの総務省の原本（固定電話 9 系統の過去版を含む）に対して `atlas update --offline` が `outcome: ok` で通りました（固定電話以外の表は対象外として飛ばす。[docs/operations.md](docs/operations.md)）。同日、e-Stat から 2020 年小地域（大阪府・岩手県・長野県・高知県）を取り込み、最初の分類 run を作りました。GIS・地価・外部証拠が未取得のため、ほとんどの分類は「資料不足」です。
 > - 12分類のルールは全分類が未承認のため、**確定は出力されません**。
 
 ## 何をするか
